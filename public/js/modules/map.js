@@ -519,8 +519,8 @@ export function createMapController(containerId, { onStopSelect } = {}) {
   }
 
   function buildStopPopupMarkup(arrivalPayload) {
-    const cards = arrivalPayload.services
-      .filter((service) => service.servesStop)
+    const visibleServices = arrivalPayload.services.filter((service) => service.servesStop);
+    const cards = visibleServices
       .map((service) => {
         const buses = (service.upcomingBuses || [])
           .slice(0, 3)
@@ -539,11 +539,7 @@ export function createMapController(containerId, { onStopSelect } = {}) {
           .join('');
 
         return `
-          <div class="stop-popup-service">
-            <div class="stop-popup-service-head">
-              <span class="stop-popup-route" style="background:${escapeHtml(service.color)}">${service.serviceNo}</span>
-              <span class="stop-popup-operator">${escapeHtml(service.operator || 'LTA live')}</span>
-            </div>
+          <div class="stop-popup-service" style="--service-accent:${escapeHtml(service.color)}">
             <div class="stop-popup-etas">
               ${buses || '<span class="stop-popup-state">No live estimate</span>'}
             </div>
@@ -560,7 +556,10 @@ export function createMapController(containerId, { onStopSelect } = {}) {
       },
       cards
         ? `<div class="stop-popup-services">${cards}</div>`
-        : '<p class="stop-popup-state">No live estimate</p>'
+        : '<p class="stop-popup-state">No live estimate</p>',
+      {
+        headerBadges: buildStopPopupHeaderBadges(visibleServices),
+      }
     );
   }
 
@@ -592,16 +591,41 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     `;
   }
 
-  function buildStopPopupShell(stop, bodyMarkup) {
+  function buildStopPopupShell(stop, bodyMarkup, { headerBadges = '' } = {}) {
     return `
       <div class="stop-popup">
         <div class="stop-popup-head">
-          <p class="stop-popup-title">${escapeHtml(stop.name)}</p>
+          <div class="stop-popup-title-row">
+            <p class="stop-popup-title">${escapeHtml(stop.name)}</p>
+            ${headerBadges ? `<div class="stop-popup-title-badges">${headerBadges}</div>` : ''}
+          </div>
           ${buildStopMetaMarkup(stop)}
         </div>
         ${bodyMarkup}
       </div>
     `;
+  }
+
+  function buildStopPopupHeaderBadges(entries) {
+    const seen = new Set();
+
+    return entries
+      .filter((entry) => {
+        if (!entry?.serviceNo || seen.has(entry.serviceNo)) {
+          return false;
+        }
+
+        seen.add(entry.serviceNo);
+        return true;
+      })
+      .map(
+        (entry) => `
+          <span class="stop-popup-route stop-popup-route-header" style="background:${escapeHtml(entry.color)}">
+            ${escapeHtml(entry.serviceNo)}
+          </span>
+        `
+      )
+      .join('');
   }
 
   function buildStopMetaMarkup(stop) {
@@ -628,15 +652,24 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     const cards = visibleEntries
       .map((entry) => {
         const firstBusLabel = entry.firstBusTime ? `First bus ${entry.firstBusTime}` : 'See route notice';
+        const noteParts = [];
+
+        if (entry.operates && !/omnibus/i.test(entry.operates)) {
+          noteParts.push(entry.operates);
+        }
+
+        noteParts.push(firstBusLabel);
+        const noteMarkup = noteParts.length
+          ? `<p class="stop-popup-note">${escapeHtml(noteParts.join(' · '))}</p>`
+          : '';
 
         return `
-          <div class="stop-popup-service">
+          <div class="stop-popup-service" style="--service-accent:${escapeHtml(entry.color)}">
             <div class="stop-popup-service-head">
-              <span class="stop-popup-route" style="background:${escapeHtml(entry.color)}">${entry.serviceNo}</span>
-              <span class="stop-popup-operator">${escapeHtml(entry.shortLabel)}</span>
+              <span class="stop-popup-service-label">${escapeHtml(entry.shortLabel || entry.serviceNo)}</span>
             </div>
             <p class="stop-popup-detail">${escapeHtml(entry.stopLabel)}</p>
-            <p class="stop-popup-note">${escapeHtml(entry.operates)} · ${escapeHtml(firstBusLabel)}</p>
+            ${noteMarkup}
           </div>
         `;
       })
@@ -646,7 +679,10 @@ export function createMapController(containerId, { onStopSelect } = {}) {
       stop,
       cards
         ? `<div class="stop-popup-services">${cards}</div>`
-        : '<p class="stop-popup-state">No visible campus routes at this stop.</p>'
+        : '<p class="stop-popup-state">No visible campus routes at this stop.</p>',
+      {
+        headerBadges: buildStopPopupHeaderBadges(visibleEntries),
+      }
     );
   }
 
