@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>NTU Route Map</title>
+    <meta
+      name="description"
+      content="Interactive Leaflet map of NTU public buses 179 and 199 plus live NTU campus shuttle routes."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="/styles/main.css" />
+    <script
+      defer
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script
+      defer
+      src="https://unpkg.com/leaflet-polylineoffset@1.1.1/leaflet.polylineoffset.js"
+      crossorigin=""
+    ></script>
+    <script type="module" src="/js/main.js"></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <div id="map" class="map-canvas" aria-label="Interactive map of NTU bus and campus shuttle routes"></div>
+
+      <div class="map-overlay">
+        <aside class="floating-legend glass-panel" aria-label="NTU routes">
+          <div class="legend-head">
+            <p class="legend-title">Routes</p>
+            <button
+              class="legend-toggle"
+              id="legend-toggle"
+              type="button"
+              aria-expanded="true"
+              aria-controls="legend-actions"
+            >
+              <span class="legend-toggle-label">Show Routes</span>
+              <span class="legend-toggle-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+
+          <div class="legend-actions" id="legend-actions">
+            <button
+              class="legend-chip is-active service-chip-179"
+              data-service="179"
+              type="button"
+              aria-pressed="true"
+            >
+              <span class="legend-swatch legend-swatch-179" aria-hidden="true"></span>
+              <span>179</span>
+            </button>
+            <button
+              class="legend-chip is-active service-chip-199"
+              data-service="199"
+              type="button"
+              aria-pressed="true"
+            >
+              <span class="legend-swatch legend-swatch-199" aria-hidden="true"></span>
+              <span>199</span>
+            </button>
+            <button
+              class="legend-chip is-active service-chip-cl-b"
+              data-service="CL-B"
+              type="button"
+              aria-pressed="true"
+            >
+              <span class="legend-swatch legend-swatch-cl-b" aria-hidden="true"></span>
+              <span>CL-B</span>
+            </button>
+            <button
+              class="legend-chip is-active service-chip-cl-r"
+              data-service="CL-R"
+              type="button"
+              aria-pressed="true"
+            >
+              <span class="legend-swatch legend-swatch-cl-r" aria-hidden="true"></span>
+              <span>CL-R</span>
+            </button>
+            <button
+              class="legend-chip is-active service-chip-cr"
+              data-service="CR"
+              type="button"
+              aria-pressed="true"
+            >
+              <span class="legend-swatch legend-swatch-cr" aria-hidden="true"></span>
+              <span>CR</span>
+            </button>
+            <button
+              class="legend-chip is-active service-chip-cwr"
+              data-service="CWR"
+              type="button"
+              aria-pressed="true"
+            >
+              <span class="legend-swatch legend-swatch-cwr" aria-hidden="true"></span>
+              <span>CWR</span>
+            </button>
+          </div>
+        </aside>
+
+        <div
+          id="map-status"
+          class="status-card glass-panel"
+          role="status"
+          aria-live="polite"
+          hidden
+        ></div>
+      </div>
+    </div>
+  </body>
+</html>
