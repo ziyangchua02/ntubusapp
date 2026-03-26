@@ -1,4 +1,4 @@
-import { SERVICES } from './constants.js';
+import { DEFAULT_VISIBLE_SERVICES, SERVICES } from './constants.js';
 
 export function createUIController({ onVisibilityChange }) {
   const elements = {
@@ -9,7 +9,7 @@ export function createUIController({ onVisibilityChange }) {
     mapStatus: document.querySelector('#map-status'),
   };
 
-  let visibleServices = new Set(SERVICES);
+  let visibleServices = new Set(DEFAULT_VISIBLE_SERVICES);
   let mobileLegendExpanded = false;
 
   bindEvents();

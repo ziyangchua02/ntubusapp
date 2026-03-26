@@ -1,4 +1,4 @@
-import { INITIAL_VIEW, SERVICE_COLORS, SERVICES } from './constants.js';
+import { DEFAULT_VISIBLE_SERVICES, INITIAL_VIEW, SERVICE_COLORS, SERVICES } from './constants.js';
 import { escapeHtml } from './formatters.js';
 
 export function createMapController(containerId, { onStopSelect } = {}) {
@@ -35,7 +35,7 @@ export function createMapController(containerId, { onStopSelect } = {}) {
   const stopGroup = L.layerGroup().addTo(map);
   const vehicleGroup = L.layerGroup().addTo(map);
 
-  let visibleServices = new Set(SERVICES);
+  let visibleServices = new Set(DEFAULT_VISIBLE_SERVICES);
   let selectedStopCode = null;
   let stopLookup = new Map();
   let stopServiceLookup = new Map();
