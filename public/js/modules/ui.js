@@ -1,28 +1,47 @@
-import { DEFAULT_VISIBLE_SERVICES, SERVICES } from './constants.js';
+import { DEFAULT_VISIBLE_SERVICES, SERVICE_COLORS, SERVICES } from './constants.js';
+import { escapeHtml, formatMinutesValue } from './formatters.js';
 
 export function createUIController({ onVisibilityChange }) {
   const elements = {
-    floatingLegend: document.querySelector('.floating-legend'),
-    legendButtons: Array.from(document.querySelectorAll('.legend-chip')),
-    legendToggle: document.querySelector('#legend-toggle'),
-    legendToggleLabel: document.querySelector('.legend-toggle-label'),
+    bottomNavButtons: Array.from(document.querySelectorAll('.bottom-nav-item')),
+    nearbyPanel: document.querySelector('#nearby-panel'),
+    nearbyPanelList: document.querySelector('#nearby-panel-list'),
+    routePicker: document.querySelector('.route-picker'),
+    routeButtons: Array.from(document.querySelectorAll('.route-bubble')),
     mapStatus: document.querySelector('#map-status'),
+    viewPlaceholder: document.querySelector('#view-placeholder'),
   };
 
+  let activeView = 'bus';
   let visibleServices = new Set(DEFAULT_VISIBLE_SERVICES);
-  let mobileLegendExpanded = false;
 
   bindEvents();
-  syncLegendPanel();
-  syncLegendButtons();
+  syncNavView();
+  syncRouteButtons();
 
   return {
     hideStatus,
+    setNearbyStopsLoading,
+    setNearbyStopsState,
     showGlobalError,
   };
 
   function bindEvents() {
-    elements.legendButtons.forEach((button) => {
+    elements.bottomNavButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const targetView = button.dataset.navView;
+
+        if (targetView !== 'bus' && targetView !== 'map') {
+          return;
+        }
+
+        activeView = targetView;
+        hideStatus();
+        syncNavView();
+      });
+    });
+
+    elements.routeButtons.forEach((button) => {
       button.addEventListener('click', () => {
         const serviceNo = button.dataset.service;
 
@@ -32,48 +51,102 @@ export function createUIController({ onVisibilityChange }) {
           visibleServices.add(serviceNo);
         }
 
-        syncLegendButtons();
+        syncRouteButtons();
         hideStatus();
         onVisibilityChange?.([...visibleServices]);
       });
     });
-
-    elements.legendToggle?.addEventListener('click', () => {
-      mobileLegendExpanded = !mobileLegendExpanded;
-      syncLegendPanel();
-    });
-
-    window.addEventListener('resize', () => {
-      syncLegendPanel();
-    });
   }
 
-  function syncLegendButtons() {
-    elements.legendButtons.forEach((button) => {
+  function syncNavView() {
+    const showPlaceholder = activeView === 'map';
+
+    elements.bottomNavButtons.forEach((button) => {
+      const active = button.dataset.navView === activeView;
+      button.classList.toggle('is-active', active);
+
+      if (active) {
+        button.setAttribute('aria-current', 'page');
+      } else {
+        button.removeAttribute('aria-current');
+      }
+    });
+
+    if (elements.routePicker) {
+      elements.routePicker.hidden = showPlaceholder;
+    }
+
+    if (elements.nearbyPanel) {
+      elements.nearbyPanel.hidden = showPlaceholder;
+    }
+
+    if (elements.viewPlaceholder) {
+      elements.viewPlaceholder.hidden = !showPlaceholder;
+    }
+  }
+
+  function syncRouteButtons() {
+    elements.routeButtons.forEach((button) => {
       const active = visibleServices.has(button.dataset.service);
       button.classList.toggle('is-active', active);
       button.setAttribute('aria-pressed', String(active));
     });
   }
 
-  function syncLegendPanel() {
-    if (!elements.floatingLegend || !elements.legendToggle) {
-      return;
-    }
-
-    const isMobile = window.matchMedia('(max-width: 640px)').matches;
-    const expanded = isMobile ? mobileLegendExpanded : true;
-
-    elements.floatingLegend.classList.toggle('is-collapsed', isMobile && !expanded);
-    elements.legendToggle.hidden = !isMobile;
-    elements.legendToggle.setAttribute('aria-expanded', String(expanded));
-    elements.legendToggleLabel.textContent = expanded ? 'Hide Routes' : 'Show Routes';
-  }
-
   function hideStatus() {
     elements.mapStatus.hidden = true;
     elements.mapStatus.textContent = '';
     delete elements.mapStatus.dataset.tone;
+  }
+
+  function setNearbyStopsLoading(message = 'Finding the nearest stop for each loop...') {
+    if (!elements.nearbyPanelList) {
+      return;
+    }
+
+    elements.nearbyPanelList.innerHTML = '<p class="nearby-panel-empty">Loading nearby timings...</p>';
+  }
+
+  function setNearbyStopsState({ items = [] } = {}) {
+    if (!elements.nearbyPanelList) {
+      return;
+    }
+
+    if (!items.length) {
+      elements.nearbyPanelList.innerHTML = '<p class="nearby-panel-empty">No nearby loop data available.</p>';
+      return;
+    }
+
+    elements.nearbyPanelList.innerHTML = items
+      .filter((item) => SERVICES.includes(item.serviceNo))
+      .map((item) => {
+        const etaText = Number.isFinite(item.minutes) ? formatMinutesValue(item.minutes) : '--';
+        const etaMeta = Number.isFinite(item.minutes)
+          ? item.minutes <= 0
+            ? 'Arriving now'
+            : `${item.minutes} min away`
+          : escapeHtml(item.message || 'No live ETA');
+        const distanceText = Number.isFinite(item.distanceKm)
+          ? `${item.distanceKm < 1 ? `${Math.round(item.distanceKm * 1000)} m` : `${item.distanceKm.toFixed(1)} km`}`
+          : '--';
+
+        return `
+          <article class="nearby-stop-item">
+            <div class="nearby-stop-route" style="background:${escapeHtml(item.color || SERVICE_COLORS[item.serviceNo] || '#ffffff')}">
+              ${escapeHtml(item.serviceNo)}
+            </div>
+            <div class="nearby-stop-copy">
+              <p class="nearby-stop-name">${escapeHtml(item.stopName || 'Unknown stop')}</p>
+              <p class="nearby-stop-meta">${escapeHtml(distanceText)} • ${escapeHtml(item.roadName || 'Nearby')}</p>
+            </div>
+            <div class="nearby-stop-timing">
+              <p class="nearby-stop-eta">${escapeHtml(etaText)}</p>
+              <p class="nearby-stop-eta-note">${etaMeta}</p>
+            </div>
+          </article>
+        `;
+      })
+      .join('');
   }
 
   function showGlobalError(message) {

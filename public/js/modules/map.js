@@ -8,15 +8,13 @@ export function createMapController(containerId, { onStopSelect } = {}) {
 
   const { L } = window;
   const map = L.map(containerId, {
+    attributionControl: false,
     zoomControl: false,
     preferCanvas: true,
     minZoom: 12,
   }).setView(INITIAL_VIEW.center, INITIAL_VIEW.zoom);
 
-  L.control.zoom({ position: 'bottomright' }).addTo(map);
-
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
     maxZoom: 19,
   }).addTo(map);
 
@@ -28,6 +26,8 @@ export function createMapController(containerId, { onStopSelect } = {}) {
   map.getPane('route-line-pane').style.zIndex = '410';
   map.createPane('stop-pane');
   map.getPane('stop-pane').style.zIndex = '420';
+  map.createPane('user-pane');
+  map.getPane('user-pane').style.zIndex = '430';
   map.createPane('vehicle-pane');
   map.getPane('vehicle-pane').style.zIndex = '440';
 
@@ -41,6 +41,7 @@ export function createMapController(containerId, { onStopSelect } = {}) {
   let stopServiceLookup = new Map();
   let markerLookup = new Map();
   let routeLookup = new Map();
+  let userLocationMarker = null;
   let vehicleLookup = new Map();
 
   map.on('zoomend', updateRouteOffsets);
@@ -53,7 +54,9 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     getStop,
     highlightStop,
     isStopPopupOpen,
+    clearUserLocation,
     resetView,
+    setUserLocation,
     setVisibleServices,
     setDataset,
     setVehicles,
@@ -223,6 +226,44 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     vehicleLookup = new Map();
   }
 
+  function setUserLocation({ lat, lng } = {}) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      clearUserLocation();
+      return;
+    }
+
+    const latLng = [lat, lng];
+
+    if (!userLocationMarker) {
+      userLocationMarker = L.marker(latLng, {
+        icon: buildUserLocationIcon(),
+        keyboard: false,
+        pane: 'user-pane',
+        zIndexOffset: 1600,
+      })
+        .bindTooltip('Your location', {
+          className: 'stop-tooltip',
+          direction: 'top',
+          offset: [0, -12],
+          opacity: 1,
+        })
+        .addTo(map);
+
+      return;
+    }
+
+    userLocationMarker.setLatLng(latLng);
+  }
+
+  function clearUserLocation() {
+    if (!userLocationMarker) {
+      return;
+    }
+
+    userLocationMarker.remove();
+    userLocationMarker = null;
+  }
+
   function updateRouteVisibility() {
     for (const [serviceNo, layers] of routeLookup.entries()) {
       const visible = visibleServices.has(serviceNo);
@@ -312,6 +353,21 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     return L.divIcon({
       className: classNames.join(' '),
       html: `<span class="stop-marker" style="--marker-fill:${getMarkerFill(services)}"></span>`,
+      iconSize: [22, 22],
+      iconAnchor: [11, 11],
+      tooltipAnchor: [0, -12],
+    });
+  }
+
+  function buildUserLocationIcon() {
+    return L.divIcon({
+      className: 'user-location-icon',
+      html: `
+        <span class="user-location-marker">
+          <span class="user-location-pulse" aria-hidden="true"></span>
+          <span class="user-location-core" aria-hidden="true"></span>
+        </span>
+      `,
       iconSize: [22, 22],
       iconAnchor: [11, 11],
       tooltipAnchor: [0, -12],

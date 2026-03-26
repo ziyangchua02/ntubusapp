@@ -42,78 +42,71 @@
       <div id="map" class="map-canvas" aria-label="Interactive map of NTU bus and campus shuttle routes"></div>
 
       <div class="map-overlay">
-        <aside class="floating-legend glass-panel" aria-label="NTU routes">
-          <div class="legend-head">
-            <p class="legend-title">Routes</p>
-            <button
-              class="legend-toggle"
-              id="legend-toggle"
-              type="button"
-              aria-expanded="true"
-              aria-controls="legend-actions"
-            >
-              <span class="legend-toggle-label">Show Routes</span>
-              <span class="legend-toggle-icon" aria-hidden="true"></span>
-            </button>
+        <section class="nearby-panel glass-panel" id="nearby-panel" aria-live="polite">
+          <div class="nearby-panel-head">
+            <p class="nearby-panel-title">Nearest Stops</p>
           </div>
+          <div class="nearby-panel-list" id="nearby-panel-list">
+            <p class="nearby-panel-empty">Waiting for your location.</p>
+          </div>
+        </section>
 
-          <div class="legend-actions" id="legend-actions">
-            <button
-              class="legend-chip service-chip-179"
-              data-service="179"
-              type="button"
-              aria-pressed="false"
-            >
-              <span class="legend-swatch legend-swatch-179" aria-hidden="true"></span>
-              <span>179</span>
-            </button>
-            <button
-              class="legend-chip service-chip-199"
-              data-service="199"
-              type="button"
-              aria-pressed="false"
-            >
-              <span class="legend-swatch legend-swatch-199" aria-hidden="true"></span>
-              <span>199</span>
-            </button>
-            <button
-              class="legend-chip is-active service-chip-cl-b"
-              data-service="CL-B"
-              type="button"
-              aria-pressed="true"
-            >
-              <span class="legend-swatch legend-swatch-cl-b" aria-hidden="true"></span>
-              <span>CL-B</span>
-            </button>
-            <button
-              class="legend-chip is-active service-chip-cl-r"
-              data-service="CL-R"
-              type="button"
-              aria-pressed="true"
-            >
-              <span class="legend-swatch legend-swatch-cl-r" aria-hidden="true"></span>
-              <span>CL-R</span>
-            </button>
-            <button
-              class="legend-chip service-chip-cr"
-              data-service="CR"
-              type="button"
-              aria-pressed="false"
-            >
-              <span class="legend-swatch legend-swatch-cr" aria-hidden="true"></span>
-              <span>CR</span>
-            </button>
-            <button
-              class="legend-chip service-chip-cwr"
-              data-service="CWR"
-              type="button"
-              aria-pressed="false"
-            >
-              <span class="legend-swatch legend-swatch-cwr" aria-hidden="true"></span>
-              <span>CWR</span>
-            </button>
-          </div>
-        </aside>
+        <div class="route-picker" aria-label="Route selection">
+          <button
+            class="route-bubble route-bubble-179 is-active"
+            data-service="179"
+            type="button"
+            aria-label="Toggle route 179"
+            aria-pressed="true"
+          >
+            <span class="route-bubble-label">179</span>
+          </button>
+          <button
+            class="route-bubble route-bubble-199 is-active"
+            data-service="199"
+            type="button"
+            aria-label="Toggle route 199"
+            aria-pressed="true"
+          >
+            <span class="route-bubble-label">199</span>
+          </button>
+          <button
+            class="route-bubble route-bubble-cl-b is-active"
+            data-service="CL-B"
+            type="button"
+            aria-label="Toggle route CL-B"
+            aria-pressed="true"
+          >
+            <span class="route-bubble-label route-bubble-label-compact">CL-B</span>
+          </button>
+          <button
+            class="route-bubble route-bubble-cl-r is-active"
+            data-service="CL-R"
+            type="button"
+            aria-label="Toggle route CL-R"
+            aria-pressed="true"
+          >
+            <span class="route-bubble-label route-bubble-label-compact">CL-R</span>
+          </button>
+          <button
+            class="route-bubble route-bubble-cr"
+            data-service="CR"
+            type="button"
+            aria-label="Toggle route CR"
+            aria-pressed="false"
+          >
+            <span class="route-bubble-label">CR</span>
+          </button>
+          <button
+            class="route-bubble route-bubble-cwr"
+            data-service="CWR"
+            type="button"
+            aria-label="Toggle route CWR"
+            aria-pressed="false"
+          >
+            <span class="route-bubble-label route-bubble-label-compact">CWR</span>
+          </button>
+        </div>
 
         <div
           id="map-status"
@@ -122,6 +115,52 @@
           aria-live="polite"
           hidden
         ></div>
+
+        <div class="view-placeholder" id="view-placeholder" hidden aria-hidden="true"></div>
+
+        <nav class="bottom-nav glass-panel" aria-label="Primary navigation">
+          <button
+            class="bottom-nav-item is-active"
+            type="button"
+            data-nav-view="bus"
+            aria-current="page"
+            aria-label="Bus"
+          >
+            <span class="bottom-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M6 3h12l2 7v8a1 1 0 0 1-1 1h-1a2 2 0 0 1-4 0h-4a2 2 0 0 1-4 0H5a1 1 0 0 1-1-1v-8l2-7Zm1.5 2L6.2 9h11.6L16.5 5h-9ZM6 11v4h12v-4H6Z"></path>
+              </svg>
+            </span>
+            <span class="bottom-nav-label">Bus</span>
+          </button>
+
+          <button class="bottom-nav-item" type="button" data-nav-view="map" aria-label="Map">
+            <span class="bottom-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M15.5 4 9 6.3 3.6 4.5A1 1 0 0 0 2 5.4v13.2a1 1 0 0 0 .68.95l6 2a1 1 0 0 0 .64 0L16 19.2l5.4 1.8a1 1 0 0 0 1.6-.95V6.85a1 1 0 0 0-.68-.95l-6-2a1 1 0 0 0-.86.1ZM10 8.02l5-1.77v9.73l-5 1.77V8.02Zm-6-1.24 4 1.33v9.11l-4-1.33V6.78Zm17 10.44-4-1.33V6.78l4 1.33v9.11Z"></path>
+              </svg>
+            </span>
+            <span class="bottom-nav-label">Map</span>
+          </button>
+
+          <button class="bottom-nav-item is-soon" type="button" data-nav-view="soon" aria-label="Coming soon">
+            <span class="bottom-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M12 2.75a.75.75 0 0 1 .75.75v2.22l1.43-1.44a.75.75 0 1 1 1.06 1.06L13.8 6.78h2.2a.75.75 0 0 1 0 1.5h-2.2l1.44 1.43a.75.75 0 1 1-1.06 1.06l-1.43-1.44v2.2a.75.75 0 0 1-1.5 0v-2.2L9.82 10.77a.75.75 0 1 1-1.06-1.06L10.2 8.28H8a.75.75 0 0 1 0-1.5h2.2L8.76 5.34a.75.75 0 0 1 1.06-1.06l1.43 1.44V3.5A.75.75 0 0 1 12 2.75Zm-5.5 11a.75.75 0 0 1 .75.75v1h1a.75.75 0 0 1 0 1.5h-1v1a.75.75 0 0 1-1.5 0v-1h-1a.75.75 0 0 1 0-1.5h1v-1a.75.75 0 0 1 .75-.75Zm11 2a.75.75 0 0 1 .75.75v.5h.5a.75.75 0 0 1 0 1.5h-.5v.5a.75.75 0 0 1-1.5 0v-.5h-.5a.75.75 0 0 1 0-1.5h.5v-.5a.75.75 0 0 1 .75-.75Z"></path>
+              </svg>
+            </span>
+            <span class="bottom-nav-label bottom-nav-label-multiline">Coming Soon</span>
+          </button>
+
+          <button class="bottom-nav-item" type="button" data-nav-view="settings" aria-label="Settings">
+            <span class="bottom-nav-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M10.62 2.84a1 1 0 0 1 .95-.74h.86a1 1 0 0 1 .95.74l.4 1.47c.3.1.59.23.88.37l1.39-.8a1 1 0 0 1 1.18.14l.6.6a1 1 0 0 1 .14 1.18l-.8 1.39c.14.29.26.58.37.88l1.47.4a1 1 0 0 1 .74.95v.86a1 1 0 0 1-.74.95l-1.47.4a6.94 6.94 0 0 1-.37.88l.8 1.39a1 1 0 0 1-.14 1.18l-.6.6a1 1 0 0 1-1.18.14l-1.39-.8c-.29.14-.58.26-.88.37l-.4 1.47a1 1 0 0 1-.95.74h-.86a1 1 0 0 1-.95-.74l-.4-1.47a6.94 6.94 0 0 1-.88-.37l-1.39.8a1 1 0 0 1-1.18-.14l-.6-.6a1 1 0 0 1-.14-1.18l.8-1.39a6.94 6.94 0 0 1-.37-.88l-1.47-.4a1 1 0 0 1-.74-.95v-.86a1 1 0 0 1 .74-.95l1.47-.4c.1-.3.23-.59.37-.88l-.8-1.39a1 1 0 0 1 .14-1.18l.6-.6a1 1 0 0 1 1.18-.14l1.39.8c.29-.14.58-.26.88-.37l.4-1.47ZM12 8.5A3.5 3.5 0 1 0 12 15.5 3.5 3.5 0 0 0 12 8.5Z"></path>
+              </svg>
+            </span>
+            <span class="bottom-nav-label">Settings</span>
+          </button>
+        </nav>
       </div>
     </div>
   </body>

@@ -15,7 +15,6 @@ const PORT = Number(process.env.PORT || 3000);
 const LTA_ACCOUNT_KEY = process.env.LTA_ACCOUNT_KEY;
 const LTA_BASE_URL = 'https://datamall2.mytransport.sg/ltaodataservice';
 const BUSROUTER_BASE_URL = 'https://data.busrouter.sg/v1';
-const ARRIVELAH_BASE_URL = 'https://arrivelah2.busrouter.sg/';
 const NTU_OMNIBUS_BASE_URL = 'https://apps.ntu.edu.sg/NTUOmnibus/';
 const PUBLIC_BUS_SERVICES = ['179', '199'];
 const CAMPUS_SHUTTLE_SERVICES = Object.keys(ntuCampusShuttleSource.services);
@@ -90,15 +89,28 @@ const CAMPUS_OMNIBUS_ROUTE_MAP = {
   },
 };
 
+const PUBLIC_OMNIBUS_ROUTE_MAP = {
+  '179': {
+    routeName: '179',
+    routeColorCode: '944496',
+  },
+  '199': {
+    routeName: '199',
+    routeColorCode: '944496',
+  },
+};
+
 const NTU_OMNIBUS_API = {
   pickupCheckPoints: 'T2ld7BA3eca74ndBz+xz1Q',
   activeBusServicesData: 'ZqTN65XW1uKLZ0T8NTg0jw',
   eta: '2vqnARteBS8UFZvhYCydcw',
+  etaLta: 'NBbTcPPSIJ15dc3NGRGWtA',
 };
 
 const NTU_OMNIBUS_CLIENT_VARIABLES = {
   SGHO_RouteColorCode: 'D9860A',
-  NTU_RouteColorCode: '0054A6',
+  NTU_RouteColorCode:
+    "{'data':[{'route_code':'Blue','color_code':'0054A6','Order':'2'},{'route_code':'Green','color_code':'007C48','Order':'3'},{'route_code':'Brown','color_code':'866D4B','Order':'4'},{'route_code':'Red','color_code':'D71440','Order':'1'},{'route_code':'179','color_code':'944496','Order':'5'},{'route_code':'179A','color_code':'944496','Order':'6'},{'route_code':'199','color_code':'944496','Order':'7'},{'route_code':'default','color_code':'181C62','Order':'8'}]}",
 };
 
 const NTU_OMNIBUS_HEADERS = {
@@ -132,7 +144,8 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     configured: Boolean(LTA_ACCOUNT_KEY),
     routeSource: 'public-busrouter-plus-ntu-omnibus',
-    publicLiveSource: LTA_ACCOUNT_KEY ? 'lta-datamall' : 'arrivelah-fallback',
+    publicLiveSource: LTA_ACCOUNT_KEY ? 'lta-datamall' : 'public-vehicle-markers-disabled',
+    publicArrivalSource: LTA_ACCOUNT_KEY ? 'lta-datamall' : 'ntu-omnibus-fallback',
     campusLiveSource: 'ntu-omnibus',
     liveDataAvailable: true,
     liveServices: SERVICES,
@@ -742,21 +755,6 @@ async function fetchPublicJson(url) {
   return response.json();
 }
 
-async function fetchArriveLahJson(busStopCode) {
-  const url = new URL(ARRIVELAH_BASE_URL);
-  url.searchParams.set('id', busStopCode);
-
-  try {
-    return await fetchPublicJson(url.toString());
-  } catch (error) {
-    if (error instanceof ApiError) {
-      throw new ApiError(error.status, 'Live bus timings could not be loaded right now.', error.detail);
-    }
-
-    throw error;
-  }
-}
-
 async function fetchCampusOmnibusPickupCheckPoints(serviceNo) {
   const routeConfig = CAMPUS_OMNIBUS_ROUTE_MAP[serviceNo];
 
@@ -785,6 +783,20 @@ async function fetchCampusOmnibusVehicles(serviceNo) {
   );
 }
 
+async function fetchPublicOmnibusVehicles(serviceNo) {
+  const routeConfig = PUBLIC_OMNIBUS_ROUTE_MAP[serviceNo];
+
+  if (!routeConfig) {
+    throw new ApiError(500, `No NTU Omnibus mapping is defined for public route ${serviceNo}.`);
+  }
+
+  return fetchNtuOmnibusJson(
+    '/screenservices/CampusShuttle_MUI/MainFlow/RenderMap/DataActionGetActiveBusServicesData',
+    NTU_OMNIBUS_API.activeBusServicesData,
+    buildPublicOmnibusRoutePayload(serviceNo)
+  );
+}
+
 async function fetchCampusOmnibusEta(busStopCode, serviceNo) {
   const routeConfig = CAMPUS_OMNIBUS_ROUTE_MAP[serviceNo];
 
@@ -804,6 +816,25 @@ async function fetchCampusOmnibusEta(busStopCode, serviceNo) {
   );
 }
 
+async function fetchPublicOmnibusEta(busStopCode, serviceNo) {
+  const routeConfig = PUBLIC_OMNIBUS_ROUTE_MAP[serviceNo];
+
+  if (!routeConfig) {
+    throw new ApiError(500, `No NTU Omnibus mapping is defined for public route ${serviceNo}.`);
+  }
+
+  return fetchNtuOmnibusJson(
+    '/screenservices/CampusShuttle_MUI/ActionGetETAAndNextETA_LTA',
+    NTU_OMNIBUS_API.etaLta,
+    {
+      inputParameters: {
+        BusStopCode: busStopCode,
+        ServiceNo: routeConfig.routeName,
+      },
+    }
+  );
+}
+
 function buildCampusOmnibusRoutePayload(serviceNo) {
   const routeConfig = CAMPUS_OMNIBUS_ROUTE_MAP[serviceNo];
 
@@ -812,6 +843,36 @@ function buildCampusOmnibusRoutePayload(serviceNo) {
       variables: {
         RouteId: routeConfig.routeName,
         IsSBS_Route: false,
+        CurrDateTime_Local: formatSingaporeDateTime(new Date()),
+        RouteColorCode: routeConfig.routeColorCode,
+        RouteName: routeConfig.routeName,
+        UserCurrLat: String(NTU_VIEW.center.lat),
+        _userCurrLatInDataFetchStatus: 1,
+        UserCurrLng: String(NTU_VIEW.center.lng),
+        _userCurrLngInDataFetchStatus: 1,
+        CurrDateTime: '1900-01-01T00:00:00',
+        _currDateTimeInDataFetchStatus: 1,
+        CheckIsScreenActive: true,
+        _checkIsScreenActiveInDataFetchStatus: 1,
+        IsRenderMapActive: true,
+        _isRenderMapActiveInDataFetchStatus: 1,
+      },
+    },
+    clientVariables: {
+      ...NTU_OMNIBUS_CLIENT_VARIABLES,
+      SelectedRoute: routeConfig.routeName,
+    },
+  };
+}
+
+function buildPublicOmnibusRoutePayload(serviceNo) {
+  const routeConfig = PUBLIC_OMNIBUS_ROUTE_MAP[serviceNo];
+
+  return {
+    screenData: {
+      variables: {
+        RouteId: routeConfig.routeName,
+        IsSBS_Route: true,
         CurrDateTime_Local: formatSingaporeDateTime(new Date()),
         RouteColorCode: routeConfig.routeColorCode,
         RouteName: routeConfig.routeName,
@@ -1132,7 +1193,9 @@ async function fetchMergedArrivalPayload(stopMeta) {
   const publicServices = stopMeta.services.filter((serviceNo) => PUBLIC_LIVE_SERVICE_SET.has(serviceNo));
   const campusServices = stopMeta.services.filter((serviceNo) => CAMPUS_LIVE_SERVICE_SET.has(serviceNo));
   const [publicPayload, campusPayload] = await Promise.all([
-    publicServices.length ? fetchLiveArrivalPayload(stopMeta.code) : Promise.resolve(null),
+    publicServices.length
+      ? fetchPublicArrivalPayload(stopMeta, publicServices)
+      : Promise.resolve(new Map()),
     campusServices.length ? fetchCampusArrivalPayload(stopMeta, campusServices) : Promise.resolve(new Map()),
   ]);
 
@@ -1176,18 +1239,73 @@ async function fetchCampusArrivalPayload(stopMeta, serviceNos) {
   return new Map(results);
 }
 
-function fetchLiveArrivalPayload(busStopCode) {
+async function fetchPublicArrivalPayload(stopMeta, serviceNos) {
   if (LTA_ACCOUNT_KEY) {
-    return fetchDatamallJson('/v3/BusArrival', {
-      BusStopCode: busStopCode,
+    const payload = await fetchDatamallJson('/v3/BusArrival', {
+      BusStopCode: stopMeta.code,
     });
+
+    return normalizeDatamallArrivalPayload(payload, serviceNos);
   }
 
-  return fetchArriveLahJson(busStopCode);
+  const results = await Promise.all(
+    serviceNos.map(async (serviceNo) => {
+      try {
+        const payload = await fetchPublicOmnibusEta(stopMeta.code, serviceNo);
+
+        return [
+          serviceNo,
+          {
+            operator: 'Public live via NTU Omnibus',
+            upcomingBuses: normalizePublicOmnibusUpcomingBuses(payload?.data),
+            message: null,
+          },
+        ];
+      } catch (error) {
+        return [
+          serviceNo,
+          {
+            operator: 'Public live via NTU Omnibus',
+            upcomingBuses: [],
+            message:
+              error instanceof ApiError
+                ? error.message
+                : 'Public bus timings could not be loaded right now.',
+          },
+        ];
+      }
+    })
+  );
+
+  return new Map(results);
+}
+
+function normalizeDatamallArrivalPayload(payload, serviceNos) {
+  const serviceLookup = new Map(
+    (Array.isArray(payload?.Services) ? payload.Services : [])
+      .filter((entry) => PUBLIC_BUS_SERVICES.includes(String(entry.ServiceNo)))
+      .map((entry) => [String(entry.ServiceNo), entry])
+  );
+
+  return new Map(
+    serviceNos.map((serviceNo) => {
+      const service = serviceLookup.get(serviceNo);
+      return [
+        serviceNo,
+        {
+          operator: service?.Operator || null,
+          upcomingBuses: [service?.NextBus, service?.NextBus2, service?.NextBus3]
+            .map((bus, index) => normalizeNextBus(bus || null, index + 1))
+            .filter(Boolean),
+          message: null,
+        },
+      ];
+    })
+  );
 }
 
 function buildArrivalResponse(busStopCode, stopMeta, payload) {
-  const publicLiveServices = new Map(normalizeLiveServices(payload?.publicPayload));
+  const publicLiveServices = payload?.publicPayload || new Map();
   const campusLiveServices = payload?.campusPayload || new Map();
 
   const services = SERVICES.map((serviceNo) => {
@@ -1197,9 +1315,7 @@ function buildArrivalResponse(busStopCode, stopMeta, payload) {
     const upcomingBuses = servesStop
       ? campusService
         ? campusService.upcomingBuses
-        : [publicService?.NextBus, publicService?.NextBus2, publicService?.NextBus3]
-            .map((bus, index) => normalizeNextBus(bus || null, index + 1))
-            .filter(Boolean)
+        : publicService?.upcomingBuses || []
       : [];
 
     return {
@@ -1208,11 +1324,11 @@ function buildArrivalResponse(busStopCode, stopMeta, payload) {
       servesStop,
       nextBus: upcomingBuses[0] || null,
       upcomingBuses,
-      operator: campusService?.operator || publicService?.Operator || null,
+      operator: campusService?.operator || publicService?.operator || null,
       message: servesStop
         ? upcomingBuses.length
           ? null
-          : campusService?.message || 'No live estimate is available right now.'
+          : campusService?.message || publicService?.message || 'No live estimate is available right now.'
         : 'This route does not serve the selected stop.',
     };
   });
@@ -1226,32 +1342,23 @@ function buildArrivalResponse(busStopCode, stopMeta, payload) {
   };
 }
 
-function normalizeLiveServices(payload) {
-  if (LTA_ACCOUNT_KEY) {
-    return (Array.isArray(payload?.Services) ? payload.Services : [])
-      .filter((entry) => PUBLIC_BUS_SERVICES.includes(String(entry.ServiceNo)))
-      .map((entry) => [String(entry.ServiceNo), entry]);
-  }
-
-  return (Array.isArray(payload?.services) ? payload.services : [])
-    .filter((entry) => PUBLIC_BUS_SERVICES.includes(String(entry.no)))
-    .map((entry) => [
-      String(entry.no),
-      {
-        ServiceNo: String(entry.no),
-        Operator: entry.operator || null,
-        NextBus: normalizeArriveLahBus(entry.next),
-        NextBus2: normalizeArriveLahBus(entry.next2 || entry.subsequent),
-        NextBus3: normalizeArriveLahBus(entry.next3),
-      },
-    ]);
-}
-
 function normalizeCampusUpcomingBuses(payload) {
   const values = [payload?.ETA, payload?.NextETA];
 
   return values
     .map((value, index) => normalizeCampusEtaBus(value, index + 1))
+    .filter(Boolean);
+}
+
+function normalizePublicOmnibusUpcomingBuses(payload) {
+  if (payload?.IsETA_NotFound) {
+    return [];
+  }
+
+  const values = [payload?.ETA, payload?.NextETA];
+
+  return values
+    .map((value, index) => normalizePublicOmnibusEtaBus(value, index + 1))
     .filter(Boolean);
 }
 
@@ -1270,6 +1377,31 @@ function normalizeCampusEtaBus(value, visitNumber) {
     loadLabel: 'Load unavailable',
     type: null,
     typeLabel: 'Campus shuttle',
+    wheelchairAccessible: false,
+    monitored: true,
+    feature: null,
+    originCode: null,
+    destinationCode: null,
+    lat: null,
+    lng: null,
+  };
+}
+
+function normalizePublicOmnibusEtaBus(value, visitNumber) {
+  const minutes = parseCampusEtaMinutes(value);
+
+  if (minutes == null) {
+    return null;
+  }
+
+  return {
+    estimatedArrival: new Date(Date.now() + minutes * 60_000).toISOString(),
+    minutes,
+    visitNumber,
+    load: null,
+    loadLabel: 'Load unavailable',
+    type: null,
+    typeLabel: 'Public bus',
     wheelchairAccessible: false,
     monitored: true,
     feature: null,
@@ -1299,25 +1431,6 @@ function parseCampusEtaMinutes(value) {
   return Number.isFinite(minutes) ? Math.max(minutes, 0) : null;
 }
 
-function normalizeArriveLahBus(bus) {
-  if (!bus?.time) {
-    return null;
-  }
-
-  return {
-    EstimatedArrival: bus.time,
-    Load: bus.load || null,
-    Feature: bus.feature || null,
-    Type: bus.type || null,
-    VisitNumber: bus.visit_number || null,
-    OriginCode: bus.origin_code || null,
-    DestinationCode: bus.destination_code || null,
-    Latitude: Number(bus.lat || 0),
-    Longitude: Number(bus.lng || 0),
-    Monitored: Number(bus.monitored || 0),
-  };
-}
-
 function normalizeNextBus(nextBus, visitNumber) {
   if (!nextBus?.EstimatedArrival) {
     return null;
@@ -1345,6 +1458,14 @@ function normalizeNextBus(nextBus, visitNumber) {
 }
 
 async function collectPublicVehicles(dataset) {
+  if (!LTA_ACCOUNT_KEY) {
+    // NTU Omnibus's public "active bus" feed currently returns stop-like placeholder
+    // coordinates for 179/199, not trustworthy live vehicle telemetry. Keep public
+    // route lines and ETA fallback, but hide public vehicle markers until a real
+    // LTA DataMall key is configured.
+    return [];
+  }
+
   const stopCodes = dataset.stops
     .filter((stop) => stop.services.some((serviceNo) => PUBLIC_LIVE_SERVICE_SET.has(serviceNo)))
     .map((stop) => stop.code);
@@ -1410,6 +1531,37 @@ function normalizeCampusVehicle(serviceNo, vehicle, dataset) {
   };
 }
 
+function normalizePublicOmnibusVehicle(serviceNo, vehicle, dataset) {
+  const lat = Number(vehicle?.Lat);
+  const lng = Number(vehicle?.Lng);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat <= 0 || lng <= 0) {
+    return null;
+  }
+
+  const nearestStop = findNearestServiceStop(dataset.services?.[serviceNo], lat, lng);
+  const crowdLevel = String(vehicle?.LoadInfo?.CrowdLevel || '').toLowerCase();
+  const vehiclePlate = String(vehicle?.Vehplate || '').trim();
+
+  return {
+    id: `${serviceNo}:${vehiclePlate || `${lat.toFixed(5)}:${lng.toFixed(5)}`}`,
+    serviceNo,
+    color: SERVICE_COLORS[serviceNo],
+    estimatedArrival: new Date().toISOString(),
+    minutes: null,
+    statusLabel: 'Live public bus',
+    loadLabel: crowdLevel ? `Crowd ${crowdLevel}` : 'Load unavailable',
+    typeLabel: 'Public bus',
+    wheelchairAccessible: false,
+    lat,
+    lng,
+    bearing: Number.isFinite(Number(vehicle?.Direction)) && Number(vehicle.Direction) !== 0
+      ? Number(vehicle.Direction)
+      : null,
+    nextStopCode: nearestStop?.code || null,
+    nextStopName: nearestStop?.name || dataset.services?.[serviceNo]?.title || serviceNo,
+  };
+}
 function findNearestServiceStop(service, lat, lng) {
   const stops = service?.directions?.[0]?.stops || [];
   let nearestStop = null;
@@ -1470,6 +1622,32 @@ function collectLiveVehicles(stopResponses) {
       left.serviceNo.localeCompare(right.serviceNo) ||
       left.minutes - right.minutes ||
       left.estimatedArrival.localeCompare(right.estimatedArrival)
+  );
+}
+
+function dedupeVehicles(vehicles) {
+  const vehicleLookup = new Map();
+
+  for (const vehicle of vehicles) {
+    const existing = vehicleLookup.get(vehicle.id);
+
+    if (!existing) {
+      vehicleLookup.set(vehicle.id, vehicle);
+      continue;
+    }
+
+    if (
+      existing.minutes == null ||
+      (Number.isFinite(vehicle.minutes) && vehicle.minutes < existing.minutes)
+    ) {
+      vehicleLookup.set(vehicle.id, vehicle);
+    }
+  }
+
+  return Array.from(vehicleLookup.values()).sort(
+    (left, right) =>
+      left.serviceNo.localeCompare(right.serviceNo) ||
+      String(left.id).localeCompare(String(right.id))
   );
 }
 

@@ -1,17 +1,26 @@
 import { fetchArrivals, fetchHealth, fetchRouteDataset, fetchVehicles } from './modules/api.js';
-import { LIVE_SERVICES } from './modules/constants.js';
+import { LIVE_SERVICES, SERVICE_COLORS, SERVICES } from './modules/constants.js';
+import { distanceBetween } from './modules/formatters.js';
 import { createMapController } from './modules/map.js';
 import { createUIController } from './modules/ui.js';
 
 let dataset = null;
 let health = null;
 let mapController = null;
+let locationWatchId = null;
+let nearestStopsAbortController = null;
 let stopPopupAbortController = null;
 let vehicleAbortController = null;
 let vehicleRefreshTimerId = null;
 let activeStopCode = null;
+let userLocation = null;
 
 const LIVE_REFRESH_INTERVAL_MS = 10_000;
+const LOCATION_WATCH_OPTIONS = {
+  enableHighAccuracy: true,
+  maximumAge: 15_000,
+  timeout: 10_000,
+};
 
 const uiController = createUIController({
   onVisibilityChange: (serviceNos) => {
@@ -48,6 +57,11 @@ async function bootstrap() {
   dataset = await fetchRouteDataset();
   mapController.setDataset(dataset);
   uiController.hideStatus();
+  uiController.setNearbyStopsState({
+    items: [],
+    subtitle: 'Allow location to see nearby loops.',
+  });
+  startLocationTracking();
 
   if (health.liveDataAvailable) {
     await refreshVehicles();
@@ -58,10 +72,14 @@ async function bootstrap() {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     clearVehicleRefresh();
+    stopLocationTracking();
+    nearestStopsAbortController?.abort();
     vehicleAbortController?.abort();
     stopPopupAbortController?.abort();
     return;
   }
+
+  startLocationTracking();
 
   if (health?.liveDataAvailable) {
     void refreshLiveData().finally(() => {
@@ -149,6 +167,10 @@ async function refreshVehicles() {
 async function refreshLiveData() {
   await refreshVehicles();
 
+  if (userLocation) {
+    await refreshNearbyStops();
+  }
+
   if (activeStopCode && stopSupportsLiveData(activeStopCode) && mapController?.isStopPopupOpen(activeStopCode)) {
     await loadStopPopup(activeStopCode, { background: true });
   }
@@ -172,6 +194,153 @@ function clearVehicleRefresh() {
     window.clearTimeout(vehicleRefreshTimerId);
     vehicleRefreshTimerId = null;
   }
+}
+
+function startLocationTracking() {
+  if (!mapController || locationWatchId != null) {
+    return;
+  }
+
+  if (!navigator.geolocation) {
+    uiController.setNearbyStopsState({
+      items: [],
+      subtitle: 'Location is not supported on this device.',
+    });
+    return;
+  }
+
+  uiController.setNearbyStopsLoading('Waiting for your live location...');
+
+  locationWatchId = navigator.geolocation.watchPosition(
+    (position) => {
+      userLocation = {
+        lat: Number(position.coords?.latitude),
+        lng: Number(position.coords?.longitude),
+      };
+
+      mapController?.setUserLocation({
+        lat: userLocation.lat,
+        lng: userLocation.lng,
+      });
+      void refreshNearbyStops();
+    },
+    (error) => {
+      userLocation = null;
+      mapController?.clearUserLocation();
+      uiController.setNearbyStopsState({
+        items: [],
+        subtitle:
+          error?.code === error.PERMISSION_DENIED
+            ? 'Location access is blocked.'
+            : 'Unable to get your location right now.',
+      });
+    },
+    LOCATION_WATCH_OPTIONS
+  );
+}
+
+function stopLocationTracking() {
+  if (locationWatchId == null || !navigator.geolocation) {
+    return;
+  }
+
+  navigator.geolocation.clearWatch(locationWatchId);
+  locationWatchId = null;
+}
+
+async function refreshNearbyStops() {
+  try {
+    if (!dataset || !userLocation) {
+      return;
+    }
+
+    const nearestStops = getNearestStopsByService(dataset, userLocation);
+
+    if (!nearestStops.length) {
+      uiController.setNearbyStopsState({
+        items: [],
+        subtitle: 'No nearby loop stops found.',
+      });
+      return;
+    }
+
+    nearestStopsAbortController?.abort();
+    nearestStopsAbortController = new AbortController();
+
+    const uniqueStopCodes = Array.from(new Set(nearestStops.map((entry) => entry.stopCode)));
+    const arrivalEntries = await Promise.all(
+      uniqueStopCodes.map(async (stopCode) => {
+        try {
+          const payload = await fetchArrivals(stopCode, {
+            signal: nearestStopsAbortController.signal,
+          });
+
+          return [stopCode, payload];
+        } catch (error) {
+          if (error.name === 'AbortError') {
+            throw error;
+          }
+
+          return [stopCode, null];
+        }
+      })
+    );
+
+    const arrivalLookup = new Map(arrivalEntries);
+
+    uiController.setNearbyStopsState({
+      items: nearestStops.map((entry) => {
+        const arrivalPayload = arrivalLookup.get(entry.stopCode);
+        const service = arrivalPayload?.services?.find((candidate) => candidate.serviceNo === entry.serviceNo);
+
+        return {
+          ...entry,
+          message: service?.message || null,
+          minutes: service?.nextBus?.minutes ?? null,
+        };
+      }),
+      subtitle: 'Closest stop for each loop from your live location.',
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      return;
+    }
+
+    uiController.setNearbyStopsState({
+      items: [],
+      subtitle: 'Nearby timings could not be loaded right now.',
+    });
+  }
+}
+
+function getNearestStopsByService(routeDataset, location) {
+  return SERVICES.map((serviceNo) => {
+    const stops = routeDataset.services?.[serviceNo]?.directions?.flatMap((direction) => direction.stops || []) || [];
+    let nearestStop = null;
+    let nearestDistanceKm = Number.POSITIVE_INFINITY;
+
+    for (const stop of stops) {
+      const distanceKm = distanceBetween(location.lat, location.lng, stop.lat, stop.lng);
+
+      if (distanceKm < nearestDistanceKm) {
+        nearestDistanceKm = distanceKm;
+        nearestStop = stop;
+      }
+    }
+
+    if (!nearestStop) {
+      return null;
+    }
+
+    return {
+      color: SERVICE_COLORS[serviceNo],
+      distanceKm: nearestDistanceKm,
+      roadName: nearestStop.roadName || '',
+      serviceNo,
+      stopCode: nearestStop.code,
+      stopName: nearestStop.name,
+    };
+  }).filter(Boolean);
 }
 
 function stopSupportsLiveData(stopCode) {
