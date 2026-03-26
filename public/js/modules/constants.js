@@ -10,7 +10,7 @@ export const SERVICE_COLORS = {
 };
 
 export const LIVE_SERVICES = ['179', '199', 'CL-B', 'CL-R', 'CR', 'CWR'];
-export const DEFAULT_VISIBLE_SERVICES = ['179', '199', 'CL-B', 'CL-R'];
+export const DEFAULT_VISIBLE_SERVICES = ['CL-B', 'CL-R'];
 
 export const NTU_CENTER = {
   lat: 1.3483,
