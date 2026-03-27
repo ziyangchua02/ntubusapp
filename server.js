@@ -67,6 +67,9 @@ const ROOM_SEARCH_PHRASE_ALIASES = [
     longForm: 'lecture theatre',
   },
 ];
+const ROOM_SEARCH_LOCATION_ALIASES = [
+  ['gaia', 'wee cho yaw plaza', 'wcyp'],
+];
 const ROOM_SEARCH_ACRONYM_STOPWORDS = new Set(['and', 'at', 'for', 'in', 'of', 'the', 'to']);
 
 const routeCache = {
@@ -461,14 +464,12 @@ function scoreRoomMatch(room, queryProfile) {
   }
 
   if (
-    matchesSearchVariants(room.search.titleIndexed, normalizedVariants, (value, variant) =>
-      value.includes(variant)
-    )
+    matchesSearchVariants(room.search.titleIndexed, normalizedVariants, containsSearchPhrase)
   ) {
     score += 1450;
   }
 
-  if (matchesSearchVariants(room.search.full, normalizedVariants, (value, variant) => value.includes(variant))) {
+  if (matchesSearchVariants(room.search.full, normalizedVariants, containsSearchPhrase)) {
     score += 950;
   }
 
@@ -500,17 +501,17 @@ function scoreRoomMatch(room, queryProfile) {
       tokenMatched = true;
     }
 
-    if (token.text && room.search.title.includes(token.text)) {
+    if (token.text && containsSearchPhrase(room.search.title, token.text)) {
       score += 240;
       tokenMatched = true;
     }
 
-    if (token.text && room.search.building.includes(token.text)) {
+    if (token.text && containsSearchPhrase(room.search.building, token.text)) {
       score += 90;
       tokenMatched = true;
     }
 
-    if (token.text && room.search.campus.includes(token.text)) {
+    if (token.text && containsSearchPhrase(room.search.campus, token.text)) {
       score += 50;
       tokenMatched = true;
     }
@@ -708,6 +709,10 @@ function buildSearchVariants(value, { includeAcronyms = false, includePhraseAlia
     }
   }
 
+  for (const variant of buildLocationAliasVariants(normalized)) {
+    variants.add(variant);
+  }
+
   if (includeAcronyms) {
     for (const variant of buildAcronymVariants(normalized)) {
       variants.add(variant);
@@ -723,6 +728,24 @@ function buildPhraseAliasVariants(normalizedValue) {
   for (const alias of ROOM_SEARCH_PHRASE_ALIASES) {
     variants.add(replaceNormalizedPhrase(normalizedValue, alias.longForm, alias.shortForm));
     variants.add(replaceNormalizedPhrase(normalizedValue, alias.shortForm, alias.longForm));
+  }
+
+  return Array.from(variants).filter(Boolean);
+}
+
+function buildLocationAliasVariants(normalizedValue) {
+  const variants = new Set([normalizedValue]);
+
+  for (const aliasGroup of ROOM_SEARCH_LOCATION_ALIASES) {
+    const normalizedGroup = aliasGroup.map((alias) => normalizeSearchText(alias)).filter(Boolean);
+
+    if (!normalizedGroup.some((alias) => containsNormalizedPhrase(normalizedValue, alias))) {
+      continue;
+    }
+
+    for (const alias of normalizedGroup) {
+      variants.add(alias);
+    }
   }
 
   return Array.from(variants).filter(Boolean);
@@ -819,6 +842,21 @@ function matchesSearchVariants(value, variants, matcher) {
   }
 
   return variants.some((variant) => variant && matcher(value, variant));
+}
+
+function containsSearchPhrase(value, phrase) {
+  const normalizedValue = normalizeSearchText(value);
+  const normalizedPhrase = normalizeSearchText(phrase);
+
+  return containsNormalizedPhrase(normalizedValue, normalizedPhrase);
+}
+
+function containsNormalizedPhrase(normalizedValue, normalizedPhrase) {
+  if (!normalizedValue || !normalizedPhrase) {
+    return false;
+  }
+
+  return ` ${normalizedValue} `.includes(` ${normalizedPhrase} `);
 }
 
 function escapeRegex(value) {
