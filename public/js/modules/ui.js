@@ -20,7 +20,6 @@ export function createUIController({
     roomSearchPanel: document.querySelector('#room-search-panel'),
     roomSearchResults: document.querySelector('#room-search-results'),
     roomSearchSubmit: document.querySelector('#room-search-submit'),
-    roomSearchSubtitle: document.querySelector('#room-search-subtitle'),
     routePicker: document.querySelector('.route-picker'),
     routeButtons: Array.from(document.querySelectorAll('.route-bubble')),
     viewPlaceholder: document.querySelector('#view-placeholder'),
@@ -228,7 +227,6 @@ export function createUIController({
   function setRoomSearchLoading(query) {
     roomResults = [];
     selectedRoomId = null;
-    setRoomSearchSubtitle(`Searching for "${query}"...`);
     syncRoomSearchBusyState(true);
     syncRoomSearchClearButton();
     syncRoomSearchResultsVisibility(true);
@@ -246,11 +244,6 @@ export function createUIController({
     roomResults = items;
     selectedRoomId = selectedId || items[0]?.id || null;
 
-    setRoomSearchSubtitle(
-      items.length
-        ? `Showing ${items.length} match${items.length === 1 ? '' : 'es'} for "${query}".`
-        : `No NTU rooms matched "${query}".`
-    );
     syncRoomSearchBusyState(false);
     syncRoomSearchClearButton();
     syncRoomSearchResultsVisibility(items.length > 0 || Boolean(query));
@@ -265,7 +258,6 @@ export function createUIController({
   function setRoomSearchError(message) {
     roomResults = [];
     selectedRoomId = null;
-    setRoomSearchSubtitle('Room search is unavailable right now.');
     syncRoomSearchBusyState(false);
     syncRoomSearchClearButton();
     syncRoomSearchResultsVisibility(true);
@@ -282,7 +274,6 @@ export function createUIController({
   function resetRoomSearch() {
     roomResults = [];
     selectedRoomId = null;
-    setRoomSearchSubtitle('Search by room code or title. The selected room will be pinned on the map.');
     syncRoomSearchBusyState(false);
     syncRoomSearchClearButton();
     syncRoomSearchResultsVisibility(false);
@@ -353,15 +344,6 @@ export function createUIController({
 
     elements.nearbyPanelSubtitle.textContent = message || '';
     elements.nearbyPanelSubtitle.hidden = !message;
-  }
-
-  function setRoomSearchSubtitle(message = '') {
-    if (!elements.roomSearchSubtitle) {
-      return;
-    }
-
-    elements.roomSearchSubtitle.textContent = message || '';
-    elements.roomSearchSubtitle.hidden = !message;
   }
 
   function syncRoomSearchBusyState(isBusy) {

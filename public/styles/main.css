@@ -365,7 +365,6 @@ button {
 }
 
 .room-search-title,
-.room-search-subtitle,
 .room-search-empty,
 .room-search-result-title,
 .room-search-result-meta,
@@ -382,7 +381,6 @@ button {
   letter-spacing: 0.03em;
 }
 
-.room-search-subtitle,
 .room-search-empty,
 .room-search-result-meta,
 .room-popup-meta {
