@@ -537,11 +537,12 @@ export function createMapController(containerId, { onStopSelect } = {}) {
             `;
           })
           .join('');
+        const emptyState = escapeHtml(service.message || 'No live estimate');
 
         return `
           <div class="stop-popup-service" style="--service-accent:${escapeHtml(service.color)}">
             <div class="stop-popup-etas">
-              ${buses || '<span class="stop-popup-state">No live estimate</span>'}
+              ${buses || `<span class="stop-popup-state">${emptyState}</span>`}
             </div>
           </div>
         `;

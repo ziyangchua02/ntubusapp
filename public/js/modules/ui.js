@@ -6,6 +6,7 @@ export function createUIController({ onVisibilityChange }) {
     bottomNavButtons: Array.from(document.querySelectorAll('.bottom-nav-item')),
     nearbyPanel: document.querySelector('#nearby-panel'),
     nearbyPanelList: document.querySelector('#nearby-panel-list'),
+    nearbyPanelSubtitle: document.querySelector('#nearby-panel-subtitle'),
     routePicker: document.querySelector('.route-picker'),
     routeButtons: Array.from(document.querySelectorAll('.route-bubble')),
     mapStatus: document.querySelector('#map-status'),
@@ -23,6 +24,7 @@ export function createUIController({ onVisibilityChange }) {
     hideStatus,
     setNearbyStopsLoading,
     setNearbyStopsState,
+    showGlobalStatus,
     showGlobalError,
   };
 
@@ -100,14 +102,18 @@ export function createUIController({ onVisibilityChange }) {
   }
 
   function setNearbyStopsLoading(message = 'Finding the nearest stop for each loop...') {
+    setNearbyPanelSubtitle('Live timings refresh automatically when your location updates.');
+
     if (!elements.nearbyPanelList) {
       return;
     }
 
-    elements.nearbyPanelList.innerHTML = '<p class="nearby-panel-empty">Loading nearby timings...</p>';
+    elements.nearbyPanelList.innerHTML = `<p class="nearby-panel-empty">${escapeHtml(message)}</p>`;
   }
 
-  function setNearbyStopsState({ items = [] } = {}) {
+  function setNearbyStopsState({ items = [], subtitle = '' } = {}) {
+    setNearbyPanelSubtitle(subtitle);
+
     if (!elements.nearbyPanelList) {
       return;
     }
@@ -149,9 +155,22 @@ export function createUIController({ onVisibilityChange }) {
       .join('');
   }
 
-  function showGlobalError(message) {
+  function setNearbyPanelSubtitle(message = '') {
+    if (!elements.nearbyPanelSubtitle) {
+      return;
+    }
+
+    elements.nearbyPanelSubtitle.textContent = message || '';
+    elements.nearbyPanelSubtitle.hidden = !message;
+  }
+
+  function showGlobalStatus(message, tone = 'info') {
     elements.mapStatus.hidden = false;
     elements.mapStatus.textContent = message;
-    elements.mapStatus.dataset.tone = 'error';
+    elements.mapStatus.dataset.tone = tone;
+  }
+
+  function showGlobalError(message) {
+    showGlobalStatus(message, 'error');
   }
 }

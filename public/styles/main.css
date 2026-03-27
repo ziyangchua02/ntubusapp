@@ -11,6 +11,7 @@
   --route-cr: #2faa60;
   --route-cwr: #8a5a3c;
   --route-shared: #ffd166;
+  --status-notice: rgba(96, 66, 11, 0.88);
   --status-error: rgba(93, 17, 17, 0.82);
   --radius-lg: 22px;
   --radius-md: 18px;
@@ -94,6 +95,11 @@ button {
 .status-card[data-tone='error'] {
   background: var(--status-error);
   border-color: rgba(255, 144, 144, 0.28);
+}
+
+.status-card[data-tone='notice'] {
+  background: var(--status-notice);
+  border-color: rgba(255, 218, 128, 0.3);
 }
 
 .nearby-panel {

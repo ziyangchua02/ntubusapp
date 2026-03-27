@@ -7,7 +7,8 @@ A deployable single-page web app that renders public bus services `179` and `199
 - Leaflet map centered on Nanyang Technological University, Singapore
 - Route overlays for `179`, `199`, `CL-B`, `CL-R`, `CR`, and `CWR`
 - Official NTU Omnibus route geometry, stop list, live shuttle ETA, and live shuttle vehicle positions for campus riders
-- LTA DataMall or ArriveLah-backed live data for public buses `179` and `199`
+- LTA DataMall-backed live vehicle markers and arrivals for public buses `179` and `199` when `LTA_ACCOUNT_KEY` is configured
+- ArriveLah-backed live vehicle markers and arrivals for `179` and `199` when no LTA key is configured
 - Minimal stop markers with click popups for route-specific arrival times
 - Small Node proxy that keeps upstream API calls server-side and caches route/arrival data
 
@@ -19,7 +20,7 @@ A deployable single-page web app that renders public bus services `179` and `199
    npm install
    ```
 
-2. Create an environment file and add your LTA DataMall key:
+2. Create an environment file. Adding an LTA DataMall key is optional:
 
    ```bash
    cp .env.example .env
@@ -35,7 +36,7 @@ A deployable single-page web app that renders public bus services `179` and `199
 
 ## Environment Variables
 
-- `LTA_ACCOUNT_KEY`: Optional. Enables direct LTA DataMall access for `179` and `199`. If omitted, the app falls back to ArriveLah for those public routes.
+- `LTA_ACCOUNT_KEY`: Optional. If set, `179` and `199` use LTA DataMall for live arrivals and vehicle markers. If omitted, the app falls back to ArriveLah for those public services.
 - `PORT`: Optional. Defaults to `3000`.
 - `STATIC_CACHE_TTL_MS`: Optional. Defaults to `43200000` (12 hours).
 - `UPSTREAM_TIMEOUT_MS`: Optional. Defaults to `5000`.
@@ -44,7 +45,7 @@ A deployable single-page web app that renders public bus services `179` and `199
 
 ## Notes
 
-- Public bus routes are sourced from BusRouter geometry, with live public arrivals coming from LTA DataMall or ArriveLah.
+- Public bus routes are sourced from BusRouter geometry, with live public arrivals and vehicle markers coming from LTA DataMall when configured and ArriveLah otherwise.
 - Campus shuttle routes, campus stop timings, and campus shuttle vehicle locations are sourced from NTU's official Omnibus web backend.
 - `GET /api/routes` returns combined public and campus geometry in a single frontend-friendly payload.
 - `GET /api/vehicles` returns both public buses and campus shuttles in one live marker feed.
