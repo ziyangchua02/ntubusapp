@@ -44,3 +44,11 @@ export function fetchArrivals(busStopCode, options) {
 export function fetchVehicles(options) {
   return requestJson('/api/vehicles', options);
 }
+
+export function fetchRoomSearch(query, options) {
+  const params = new URLSearchParams({
+    q: String(query || '').trim(),
+  });
+
+  return requestJson(`/api/rooms/search?${params.toString()}`, options);
+}

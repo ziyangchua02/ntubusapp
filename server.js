@@ -16,6 +16,7 @@ const LTA_ACCOUNT_KEY = normalizeLtaAccountKey(process.env.LTA_ACCOUNT_KEY);
 const LTA_BASE_URL = 'https://datamall2.mytransport.sg/ltaodataservice';
 const ARRIVELAH_BASE_URL = 'https://arrivelah2.busrouter.sg/';
 const BUSROUTER_BASE_URL = 'https://data.busrouter.sg/v1';
+const MAZEMAP_API_BASE_URL = 'https://api.mazemap.com';
 const NTU_OMNIBUS_BASE_URL = 'https://apps.ntu.edu.sg/NTUOmnibus/';
 const PUBLIC_BUS_SERVICES = ['179', '199'];
 const CAMPUS_SHUTTLE_SERVICES = Object.keys(ntuCampusShuttleSource.services);
@@ -26,10 +27,12 @@ const LIVE_SERVICE_SET = new Set(SERVICES);
 const PAGE_SIZE = 500;
 const STATIC_CACHE_TTL_MS = Number(process.env.STATIC_CACHE_TTL_MS || 12 * 60 * 60 * 1000);
 const ARRIVAL_CACHE_TTL_MS = Number(process.env.ARRIVAL_CACHE_TTL_MS || 8000);
+const ROOM_INDEX_CACHE_TTL_MS = Number(process.env.ROOM_INDEX_CACHE_TTL_MS || 6 * 60 * 60 * 1000);
 const UPSTREAM_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS || 5000);
 const NTU_OMNIBUS_MODULE_VERSION_TTL_MS = Number(
   process.env.NTU_OMNIBUS_MODULE_VERSION_TTL_MS || 30 * 60 * 1000
 );
+const MAZEMAP_POI_PAGE_LIMIT = 2000;
 const NTU_VIEW = {
   center: {
     lat: 1.3483,
@@ -37,6 +40,34 @@ const NTU_VIEW = {
   },
   zoom: 14.7,
 };
+const NTU_ROOM_SEARCH_CAMPUSES = [
+  {
+    campusId: 2123,
+    campusName: 'NTU - Main Campus',
+    maxPages: 4,
+  },
+  {
+    campusId: 2270,
+    campusName: 'NTU - Novena',
+    maxPages: 1,
+  },
+  {
+    campusId: 2271,
+    campusName: 'NTU One-North',
+    maxPages: 1,
+  },
+];
+const ROOM_SEARCH_PHRASE_ALIASES = [
+  {
+    shortForm: 'tr',
+    longForm: 'tutorial room',
+  },
+  {
+    shortForm: 'lt',
+    longForm: 'lecture theatre',
+  },
+];
+const ROOM_SEARCH_ACRONYM_STOPWORDS = new Set(['and', 'at', 'for', 'in', 'of', 'the', 'to']);
 
 const routeCache = {
   data: null,
@@ -47,6 +78,11 @@ const routeCache = {
 const arrivalCache = new Map();
 const ntuOmnibusModuleVersionCache = {
   value: null,
+  fetchedAt: 0,
+  pending: null,
+};
+const roomIndexCache = {
+  data: null,
   fetchedAt: 0,
   pending: null,
 };
@@ -200,6 +236,29 @@ app.get('/api/vehicles', async (_req, res) => {
   }
 });
 
+app.get('/api/rooms/search', async (req, res) => {
+  try {
+    const query = String(req.query.q || '').trim();
+    const limit = clampInteger(req.query.limit, 1, 10, 8);
+
+    if (query.length < 2) {
+      throw new ApiError(400, 'Enter at least 2 characters to search NTU rooms.');
+    }
+
+    const response = await searchNtuRooms(query, {
+      limit,
+    });
+
+    res.json({
+      query,
+      updatedAt: new Date().toISOString(),
+      ...response,
+    });
+  } catch (error) {
+    handleApiError(res, error);
+  }
+});
+
 app.get(/.*/, (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
@@ -234,6 +293,578 @@ async function getRouteDataset() {
     });
 
   return routeCache.pending;
+}
+
+async function searchNtuRooms(query, { limit = 8 } = {}) {
+  const exactMatches = await searchNtuRoomsByIdentifier(query);
+
+  if (exactMatches.length) {
+    return {
+      source: 'identifier',
+      results: exactMatches.slice(0, limit).map(publicRoomSearchResult),
+    };
+  }
+
+  const roomIndex = await getNtuRoomIndex();
+
+  return {
+    source: 'indexed',
+    results: fuzzySearchNtuRooms(roomIndex, query, limit).map(publicRoomSearchResult),
+  };
+}
+
+async function searchNtuRoomsByIdentifier(query) {
+  const variants = buildRoomIdentifierVariants(query);
+  const matches = [];
+  const seen = new Set();
+
+  for (const identifier of variants) {
+    const responses = await Promise.all(
+      NTU_ROOM_SEARCH_CAMPUSES.map(async (campusConfig) => {
+        try {
+          const payload = await fetchMazeMapPois({
+            campusId: campusConfig.campusId,
+            identifier,
+            srid: 4326,
+          });
+
+          return normalizeMazeMapRoomPois(payload?.pois, campusConfig, {
+            allowAllKinds: true,
+          });
+        } catch {
+          return [];
+        }
+      })
+    );
+
+    for (const room of responses.flat()) {
+      if (seen.has(room.id)) {
+        continue;
+      }
+
+      seen.add(room.id);
+      matches.push(room);
+    }
+
+    if (matches.length) {
+      break;
+    }
+  }
+
+  return matches.sort(compareRoomResults);
+}
+
+async function getNtuRoomIndex() {
+  const cacheAge = Date.now() - roomIndexCache.fetchedAt;
+
+  if (roomIndexCache.data && cacheAge < ROOM_INDEX_CACHE_TTL_MS) {
+    return roomIndexCache.data;
+  }
+
+  if (roomIndexCache.pending) {
+    return roomIndexCache.pending;
+  }
+
+  roomIndexCache.pending = hydrateNtuRoomIndex()
+    .then((roomIndex) => {
+      roomIndexCache.data = roomIndex;
+      roomIndexCache.fetchedAt = Date.now();
+      return roomIndex;
+    })
+    .finally(() => {
+      roomIndexCache.pending = null;
+    });
+
+  return roomIndexCache.pending;
+}
+
+async function hydrateNtuRoomIndex() {
+  const campusIndexes = await Promise.all(
+    NTU_ROOM_SEARCH_CAMPUSES.map((campusConfig) => hydrateNtuRoomCampusIndex(campusConfig))
+  );
+
+  return dedupeRooms(campusIndexes.flat()).sort(compareRoomResults);
+}
+
+async function hydrateNtuRoomCampusIndex(campusConfig) {
+  const rooms = [];
+  let fromId = 0;
+  let previousCursor = null;
+
+  for (let pageNumber = 0; pageNumber < campusConfig.maxPages; pageNumber += 1) {
+    const payload = await fetchMazeMapPois({
+      campusId: campusConfig.campusId,
+      fromId: fromId || undefined,
+      srid: 4326,
+    });
+    const pois = Array.isArray(payload?.pois) ? payload.pois : [];
+    const lastPoiId = Number(pois.at(-1)?.poiId);
+    const pageLimit = Number(payload?.limit) || MAZEMAP_POI_PAGE_LIMIT;
+
+    rooms.push(...normalizeMazeMapRoomPois(pois, campusConfig));
+
+    if (
+      !pois.length ||
+      pois.length < pageLimit ||
+      !Number.isFinite(lastPoiId) ||
+      lastPoiId === fromId ||
+      lastPoiId === previousCursor
+    ) {
+      break;
+    }
+
+    previousCursor = fromId;
+    fromId = lastPoiId;
+  }
+
+  return dedupeRooms(rooms);
+}
+
+function fuzzySearchNtuRooms(roomIndex, query, limit) {
+  const queryProfile = buildRoomQueryProfile(query);
+
+  return roomIndex
+    .map((room) => ({
+      room,
+      score: scoreRoomMatch(room, queryProfile),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || compareRoomResults(left.room, right.room))
+    .slice(0, limit)
+    .map((entry) => entry.room);
+}
+
+function scoreRoomMatch(room, queryProfile) {
+  const { compactVariants, normalizedVariants, numericTokens, prefersLectureTheatre, prefersTutorialRooms, tokenMatches } =
+    queryProfile;
+  let score = 0;
+  let matchedTokens = 0;
+
+  if (matchesSearchVariants(room.search.identifierCompact, compactVariants, (value, variant) => value === variant)) {
+    score += 2600;
+  }
+
+  if (matchesSearchVariants(room.search.title, normalizedVariants, (value, variant) => value === variant)) {
+    score += 2300;
+  }
+
+  if (matchesSearchVariants(room.search.titleCompact, compactVariants, (value, variant) => value === variant)) {
+    score += 2100;
+  }
+
+  if (
+    matchesSearchVariants(room.search.identifierCompact, compactVariants, (value, variant) =>
+      value.startsWith(variant)
+    )
+  ) {
+    score += 1700;
+  }
+
+  if (
+    matchesSearchVariants(room.search.titleIndexed, normalizedVariants, (value, variant) =>
+      value.includes(variant)
+    )
+  ) {
+    score += 1450;
+  }
+
+  if (matchesSearchVariants(room.search.full, normalizedVariants, (value, variant) => value.includes(variant))) {
+    score += 950;
+  }
+
+  if (
+    matchesSearchVariants(room.search.titleIndexedCompact, compactVariants, (value, variant) =>
+      value.includes(variant)
+    )
+  ) {
+    score += 920;
+  }
+
+  if (matchesSearchVariants(room.search.fullCompact, compactVariants, (value, variant) => value.includes(variant))) {
+    score += 880;
+  }
+
+  if (
+    numericTokens.length &&
+    room.search.tutorialRoomNumbers.some((roomNumber) => numericTokens.includes(roomNumber)) &&
+    !prefersLectureTheatre
+  ) {
+    score += prefersTutorialRooms ? 2600 : 1800;
+  }
+
+  for (const token of tokenMatches) {
+    let tokenMatched = false;
+
+    if (token.compact && room.search.identifierCompact.includes(token.compact)) {
+      score += 340;
+      tokenMatched = true;
+    }
+
+    if (token.text && room.search.title.includes(token.text)) {
+      score += 240;
+      tokenMatched = true;
+    }
+
+    if (token.text && room.search.building.includes(token.text)) {
+      score += 90;
+      tokenMatched = true;
+    }
+
+    if (token.text && room.search.campus.includes(token.text)) {
+      score += 50;
+      tokenMatched = true;
+    }
+
+    if (tokenMatched) {
+      matchedTokens += 1;
+    }
+  }
+
+  if (!score) {
+    return 0;
+  }
+
+  if (tokenMatches.length > 1 && matchedTokens === 0) {
+    return 0;
+  }
+
+  if (matchedTokens === tokenMatches.length && tokenMatches.length > 0) {
+    score += 260;
+  }
+
+  return score;
+}
+
+function normalizeMazeMapRoomPois(pois, campusConfig, { allowAllKinds = false } = {}) {
+  return (Array.isArray(pois) ? pois : [])
+    .map((poi) => normalizeMazeMapRoom(poi, campusConfig, { allowAllKinds }))
+    .filter(Boolean);
+}
+
+function normalizeMazeMapRoom(poi, campusConfig, { allowAllKinds = false } = {}) {
+  const title = normalizeOptionalText(poi?.title);
+  const identifier = normalizeOptionalText(poi?.identifier);
+  const buildingName = normalizeOptionalText(poi?.buildingName);
+  const floorName = normalizeOptionalText(poi?.floorName);
+  const kind = String(poi?.kind || '').trim().toLowerCase();
+  const [lng, lat] = Array.isArray(poi?.point?.coordinates) ? poi.point.coordinates : [];
+
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+    return null;
+  }
+
+  if (!title && !identifier) {
+    return null;
+  }
+
+  if (!allowAllKinds && !isSearchableMazeMapRoomKind(kind)) {
+    return null;
+  }
+
+  const displayTitle = title || identifier;
+  const tutorialRoomNumbers = extractTutorialRoomNumbers(displayTitle);
+  const titleSearchText = normalizeSearchText(displayTitle);
+  const titleIndexedText = buildSearchIndexText([displayTitle], {
+    includePhraseAliases: true,
+  });
+  const buildingSearchText = buildSearchIndexText([buildingName], {
+    includeAcronyms: true,
+  });
+  const campusSearchText = buildSearchIndexText([campusConfig.campusName], {
+    includeAcronyms: true,
+  });
+  const fullSearchText = buildSearchIndexText(
+    [displayTitle, identifier, buildingName, floorName, campusConfig.campusName],
+    {
+      includeAcronyms: true,
+      includePhraseAliases: true,
+    }
+  );
+
+  return {
+    id: `${campusConfig.campusId}:${poi?.poiId || identifier || displayTitle}`,
+    poiId: Number.isFinite(Number(poi?.poiId)) ? Number(poi.poiId) : null,
+    campusId: campusConfig.campusId,
+    campusName: campusConfig.campusName,
+    title: displayTitle,
+    identifier,
+    buildingName,
+    floorName,
+    kind,
+    lat: Number(lat),
+    lng: Number(lng),
+    search: {
+      building: buildingSearchText,
+      campus: campusSearchText,
+      full: fullSearchText,
+      fullCompact: normalizeCompactSearchText(fullSearchText),
+      identifierCompact: normalizeCompactSearchText(identifier),
+      isTutorialRoom: tutorialRoomNumbers.length > 0,
+      title: titleSearchText,
+      titleCompact: normalizeCompactSearchText(displayTitle),
+      titleIndexed: titleIndexedText,
+      titleIndexedCompact: normalizeCompactSearchText(titleIndexedText),
+      tutorialRoomNumbers,
+    },
+  };
+}
+
+function isSearchableMazeMapRoomKind(kind) {
+  return kind === 'room' || kind === 'generic';
+}
+
+function publicRoomSearchResult(room) {
+  return {
+    id: room.id,
+    campusId: room.campusId,
+    campusName: room.campusName,
+    title: room.title,
+    identifier: room.identifier,
+    buildingName: room.buildingName,
+    floorName: room.floorName,
+    lat: room.lat,
+    lng: room.lng,
+  };
+}
+
+function buildRoomIdentifierVariants(query) {
+  const trimmed = String(query || '').trim();
+
+  return Array.from(
+    new Set(
+      [
+        trimmed,
+        trimmed.toUpperCase(),
+        trimmed.replace(/[\s_]+/g, '-'),
+        trimmed.replace(/[\s_-]+/g, ''),
+      ].filter((value) => value.length >= 2)
+    )
+  );
+}
+
+function buildRoomQueryProfile(query) {
+  const normalizedVariants = Array.from(
+    new Set(
+      buildSearchVariants(query, {
+        includePhraseAliases: true,
+      })
+    )
+  )
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length || left.localeCompare(right));
+  const compactVariants = Array.from(
+    new Set(normalizedVariants.map((variant) => normalizeCompactSearchText(variant)).filter(Boolean))
+  ).sort((left, right) => right.length - left.length || left.localeCompare(right));
+  const tokenMatches = Array.from(
+    new Set(
+      normalizedVariants.flatMap((variant) =>
+        variant
+          .split(' ')
+          .map((token) => token.trim())
+          .filter(Boolean)
+      )
+    )
+  ).map((token) => ({
+    compact: normalizeCompactSearchText(token),
+    text: token,
+  }));
+  const numericTokens = extractNumberTokens(query);
+  const tokenSet = new Set(tokenMatches.map((token) => token.text));
+
+  return {
+    compactVariants,
+    normalizedVariants,
+    numericTokens,
+    prefersLectureTheatre: tokenSet.has('lt') || normalizedVariants.some((variant) => variant.includes('lecture theatre')),
+    prefersTutorialRooms: tokenSet.has('tr') || normalizedVariants.some((variant) => variant.includes('tutorial room')),
+    tokenMatches,
+  };
+}
+
+function buildSearchIndexText(values, { includeAcronyms = false, includePhraseAliases = false } = {}) {
+  const variants = new Set();
+
+  for (const value of Array.isArray(values) ? values : [values]) {
+    for (const variant of buildSearchVariants(value, { includeAcronyms, includePhraseAliases })) {
+      variants.add(variant);
+    }
+  }
+
+  return Array.from(variants).join(' ').trim();
+}
+
+function buildSearchVariants(value, { includeAcronyms = false, includePhraseAliases = false } = {}) {
+  const normalized = normalizeSearchText(value);
+
+  if (!normalized) {
+    return [];
+  }
+
+  const variants = new Set([normalized]);
+
+  if (includePhraseAliases) {
+    for (const variant of buildPhraseAliasVariants(normalized)) {
+      variants.add(variant);
+    }
+  }
+
+  if (includeAcronyms) {
+    for (const variant of buildAcronymVariants(normalized)) {
+      variants.add(variant);
+    }
+  }
+
+  return Array.from(variants);
+}
+
+function buildPhraseAliasVariants(normalizedValue) {
+  const variants = new Set([normalizedValue]);
+
+  for (const alias of ROOM_SEARCH_PHRASE_ALIASES) {
+    variants.add(replaceNormalizedPhrase(normalizedValue, alias.longForm, alias.shortForm));
+    variants.add(replaceNormalizedPhrase(normalizedValue, alias.shortForm, alias.longForm));
+  }
+
+  return Array.from(variants).filter(Boolean);
+}
+
+function buildAcronymVariants(normalizedValue) {
+  const rawWords = normalizedValue
+    .split(' ')
+    .map((token) => normalizeSearchToken(token))
+    .filter(Boolean);
+  const significantWords = rawWords.filter((token) => !ROOM_SEARCH_ACRONYM_STOPWORDS.has(token));
+  const variants = new Set();
+
+  for (const words of [significantWords, rawWords]) {
+    if (words.length < 2) {
+      continue;
+    }
+
+    for (let start = 0; start < words.length; start += 1) {
+      for (let length = 2; length <= Math.min(5, words.length - start); length += 1) {
+        const acronym = words
+          .slice(start, start + length)
+          .map((word) => word[0])
+          .join('');
+
+        if (acronym.length < 2) {
+          continue;
+        }
+
+        for (let prefixLength = 2; prefixLength <= acronym.length; prefixLength += 1) {
+          variants.add(acronym.slice(0, prefixLength));
+        }
+      }
+    }
+  }
+
+  return Array.from(variants);
+}
+
+function replaceNormalizedPhrase(value, source, target) {
+  if (!value || !source || !target) {
+    return '';
+  }
+
+  return value
+    .replace(new RegExp(`(^| )${escapeRegex(source)}(?= |$)`, 'g'), (_, prefix) => `${prefix}${target}`)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeSearchToken(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function extractNumberTokens(value) {
+  return Array.from(
+    new Set(
+      String(value || '')
+        .match(/\d+/g)
+        ?.map((token) => normalizeNumericToken(token))
+        .filter(Boolean) || []
+    )
+  );
+}
+
+function extractTutorialRoomNumbers(value) {
+  return Array.from(
+    new Set(
+      Array.from(String(value || '').matchAll(/tutorial room\s*\+\s*(\d+)/gi))
+        .map((match) => normalizeNumericToken(match[1]))
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeNumericToken(value) {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/^0+(?=\d)/, '');
+
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+
+  return normalized;
+}
+
+function matchesSearchVariants(value, variants, matcher) {
+  if (!value || !Array.isArray(variants) || !variants.length) {
+    return false;
+  }
+
+  return variants.some((variant) => variant && matcher(value, variant));
+}
+
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9+]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function normalizeCompactSearchText(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function normalizeOptionalText(value) {
+  const normalized = String(value || '').trim();
+  return normalized || null;
+}
+
+function compareRoomResults(left, right) {
+  return (
+    String(left.campusName || '').localeCompare(String(right.campusName || '')) ||
+    String(left.buildingName || '').localeCompare(String(right.buildingName || '')) ||
+    String(left.floorName || '').localeCompare(String(right.floorName || '')) ||
+    String(left.identifier || '').localeCompare(String(right.identifier || '')) ||
+    String(left.title || '').localeCompare(String(right.title || ''))
+  );
+}
+
+function dedupeRooms(rooms) {
+  const roomLookup = new Map();
+
+  for (const room of rooms) {
+    if (!roomLookup.has(room.id)) {
+      roomLookup.set(room.id, room);
+    }
+  }
+
+  return Array.from(roomLookup.values());
 }
 
 async function hydrateRouteDataset() {
@@ -781,6 +1412,58 @@ async function fetchPublicJson(url) {
       502,
       'The public fallback dataset could not be loaded right now.',
       `${response.status} ${response.statusText}`
+    );
+  }
+
+  return response.json();
+}
+
+async function fetchMazeMapPois({ campusId, identifier, fromId, poiIds, srid = 4326 } = {}) {
+  const url = new URL('/api/pois/', MAZEMAP_API_BASE_URL);
+
+  if (Number.isFinite(Number(campusId))) {
+    url.searchParams.set('campusid', String(campusId));
+  }
+
+  if (identifier) {
+    url.searchParams.set('identifier', String(identifier).trim());
+  }
+
+  if (Number.isFinite(Number(fromId)) && Number(fromId) > 0) {
+    url.searchParams.set('fromid', String(Number(fromId)));
+  }
+
+  if (Array.isArray(poiIds) && poiIds.length) {
+    url.searchParams.set('poiids', poiIds.join(','));
+  }
+
+  if (Number.isFinite(Number(srid))) {
+    url.searchParams.set('srid', String(Number(srid)));
+  }
+
+  let response;
+
+  try {
+    response = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(Math.max(UPSTREAM_TIMEOUT_MS * 6, 30_000)),
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw new ApiError(504, 'MazeMap took too long to respond while loading NTU room data.');
+    }
+
+    throw new ApiError(502, 'The app could not reach MazeMap right now.', String(error));
+  }
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new ApiError(
+      response.status,
+      'MazeMap could not fulfil the NTU room request right now.',
+      detail.slice(0, 300)
     );
   }
 
@@ -1600,6 +2283,16 @@ function dedupeVehicles(vehicles) {
       left.serviceNo.localeCompare(right.serviceNo) ||
       String(left.id).localeCompare(String(right.id))
   );
+}
+
+function clampInteger(value, minimum, maximum, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(maximum, Math.max(minimum, parsed));
 }
 
 function handleApiError(res, error) {

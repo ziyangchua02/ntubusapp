@@ -1,4 +1,4 @@
-import { fetchArrivals, fetchHealth, fetchRouteDataset, fetchVehicles } from './modules/api.js';
+import { fetchArrivals, fetchHealth, fetchRoomSearch, fetchRouteDataset, fetchVehicles } from './modules/api.js';
 import { LIVE_SERVICES, SERVICE_COLORS, SERVICES } from './modules/constants.js';
 import { distanceBetween } from './modules/formatters.js';
 import { createMapController } from './modules/map.js';
@@ -9,10 +9,12 @@ let health = null;
 let mapController = null;
 let locationWatchId = null;
 let nearestStopsAbortController = null;
+let roomSearchAbortController = null;
 let stopPopupAbortController = null;
 let vehicleAbortController = null;
 let vehicleRefreshTimerId = null;
 let activeStopCode = null;
+let activeRoomSearchResult = null;
 let userLocation = null;
 
 const LIVE_REFRESH_INTERVAL_MS = 10_000;
@@ -23,6 +25,35 @@ const LOCATION_WATCH_OPTIONS = {
 };
 
 const uiController = createUIController({
+  onRoomClear: () => {
+    roomSearchAbortController?.abort();
+    roomSearchAbortController = null;
+    activeRoomSearchResult = null;
+    mapController?.clearRoomSearchResult();
+  },
+  onRoomResultSelect: (room) => {
+    if (!mapController || !room) {
+      return;
+    }
+
+    activeRoomSearchResult = room;
+    mapController.setRoomSearchResult(room, {
+      openPopup: true,
+    });
+    uiController.setRoomSearchSelection(room.id);
+  },
+  onRoomSearch: (query) => {
+    void searchRooms(query);
+  },
+  onViewChange: (view) => {
+    mapController?.setViewMode(view);
+
+    if (view === 'map' && activeRoomSearchResult) {
+      mapController?.setRoomSearchResult(activeRoomSearchResult, {
+        focus: false,
+      });
+    }
+  },
   onVisibilityChange: (serviceNos) => {
     if (!mapController) {
       return;
@@ -53,9 +84,18 @@ async function bootstrap() {
       mapController.openStaticStopPopup(stopCode);
     },
   });
+  mapController.setViewMode(uiController.getActiveView());
 
   dataset = await fetchRouteDataset();
   mapController.setDataset(dataset);
+
+  if (activeRoomSearchResult) {
+    mapController.setRoomSearchResult(activeRoomSearchResult, {
+      focus: uiController.getActiveView() === 'map',
+      openPopup: false,
+    });
+  }
+
   uiController.hideStatus();
   uiController.setNearbyStopsState({
     items: [],
@@ -74,6 +114,7 @@ document.addEventListener('visibilitychange', () => {
     clearVehicleRefresh();
     stopLocationTracking();
     nearestStopsAbortController?.abort();
+    roomSearchAbortController?.abort();
     vehicleAbortController?.abort();
     stopPopupAbortController?.abort();
     return;
@@ -161,6 +202,49 @@ async function refreshVehicles() {
     }
 
     mapController.setVehicles([]);
+  }
+}
+
+async function searchRooms(query) {
+  roomSearchAbortController?.abort();
+  roomSearchAbortController = new AbortController();
+  uiController.setRoomSearchLoading(query);
+
+  try {
+    const payload = await fetchRoomSearch(query, {
+      signal: roomSearchAbortController.signal,
+    });
+    const results = Array.isArray(payload?.results) ? payload.results : [];
+
+    if (!results.length) {
+      activeRoomSearchResult = null;
+      mapController?.clearRoomSearchResult();
+      uiController.setRoomSearchResults({
+        items: [],
+        query,
+      });
+      return;
+    }
+
+    const primaryResult = results[0];
+
+    activeRoomSearchResult = primaryResult;
+    mapController?.setRoomSearchResult(primaryResult, {
+      openPopup: false,
+    });
+    uiController.setRoomSearchResults({
+      items: results,
+      query,
+      selectedId: primaryResult.id,
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      return;
+    }
+
+    activeRoomSearchResult = null;
+    mapController?.clearRoomSearchResult();
+    uiController.setRoomSearchError(error.message);
   }
 }
 

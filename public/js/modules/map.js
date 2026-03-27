@@ -28,19 +28,24 @@ export function createMapController(containerId, { onStopSelect } = {}) {
   map.getPane('stop-pane').style.zIndex = '420';
   map.createPane('user-pane');
   map.getPane('user-pane').style.zIndex = '430';
+  map.createPane('room-pane');
+  map.getPane('room-pane').style.zIndex = '435';
   map.createPane('vehicle-pane');
   map.getPane('vehicle-pane').style.zIndex = '440';
 
   const routeGroup = L.layerGroup().addTo(map);
   const stopGroup = L.layerGroup().addTo(map);
+  const roomGroup = L.layerGroup().addTo(map);
   const vehicleGroup = L.layerGroup().addTo(map);
 
+  let activeViewMode = 'bus';
   let visibleServices = new Set(DEFAULT_VISIBLE_SERVICES);
   let selectedStopCode = null;
   let stopLookup = new Map();
   let stopServiceLookup = new Map();
   let markerLookup = new Map();
   let routeLookup = new Map();
+  let roomSearchMarker = null;
   let userLocationMarker = null;
   let vehicleLookup = new Map();
 
@@ -51,19 +56,23 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     openStopPopupError,
     openStopPopupLoading,
     openStaticStopPopup,
+    clearRoomSearchResult,
+    focusUserLocation,
     getStop,
     highlightStop,
     isStopPopupOpen,
     clearUserLocation,
     resetView,
+    setRoomSearchResult,
     setUserLocation,
     setVisibleServices,
+    setViewMode,
     setDataset,
     setVehicles,
   };
 
   function setDataset(dataset) {
-    clearLayers();
+    clearDatasetLayers();
 
     stopLookup = new Map(dataset.stops.map((stop) => [stop.code, stop]));
     stopServiceLookup = buildStopServiceLookup(dataset.services || {});
@@ -181,6 +190,14 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     updateVehicleVisibility();
   }
 
+  function setViewMode(nextMode) {
+    activeViewMode = nextMode === 'map' ? 'map' : 'bus';
+    updateRouteVisibility();
+    updateStopStyles();
+    updateVehicleVisibility();
+    syncRoomSearchVisibility();
+  }
+
   function highlightStop(stopCode, { focus = true } = {}) {
     selectedStopCode = stopCode;
     updateStopStyles();
@@ -226,6 +243,14 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     vehicleLookup = new Map();
   }
 
+  function clearDatasetLayers() {
+    clearLayers();
+
+    if (roomSearchMarker) {
+      syncRoomSearchVisibility();
+    }
+  }
+
   function setUserLocation({ lat, lng } = {}) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       clearUserLocation();
@@ -264,9 +289,81 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     userLocationMarker = null;
   }
 
+  function focusUserLocation() {
+    if (!userLocationMarker) {
+      return false;
+    }
+
+    map.flyTo(userLocationMarker.getLatLng(), Math.max(map.getZoom(), 17), {
+      animate: true,
+      duration: 0.55,
+    });
+    userLocationMarker.openTooltip();
+    return true;
+  }
+
+  function setRoomSearchResult(room, { focus = true, openPopup = false } = {}) {
+    if (!room || !Number.isFinite(room.lat) || !Number.isFinite(room.lng)) {
+      clearRoomSearchResult();
+      return;
+    }
+
+    const latLng = [room.lat, room.lng];
+
+    if (!roomSearchMarker) {
+      roomSearchMarker = L.marker(latLng, {
+        icon: buildRoomSearchIcon(),
+        keyboard: true,
+        pane: 'room-pane',
+        riseOnHover: true,
+        zIndexOffset: 1800,
+      });
+    } else {
+      roomSearchMarker.setLatLng(latLng);
+    }
+
+    roomSearchMarker
+      .bindPopup(buildRoomSearchPopup(room), {
+        closeButton: false,
+        minWidth: 220,
+        maxWidth: 320,
+        offset: [0, -12],
+      })
+      .bindTooltip(escapeHtml(room.title || room.identifier || 'NTU room'), {
+        className: 'stop-tooltip',
+        direction: 'top',
+        offset: [0, -12],
+        opacity: 1,
+      });
+
+    syncRoomSearchVisibility();
+
+    if (focus) {
+      map.flyTo(latLng, Math.max(map.getZoom(), 17), {
+        animate: true,
+        duration: 0.6,
+      });
+    }
+
+    if (activeViewMode === 'map' && openPopup) {
+      roomSearchMarker.openPopup();
+    } else if (roomSearchMarker.isPopupOpen()) {
+      roomSearchMarker.closePopup();
+    }
+  }
+
+  function clearRoomSearchResult() {
+    if (!roomSearchMarker) {
+      return;
+    }
+
+    roomGroup.removeLayer(roomSearchMarker);
+    roomSearchMarker = null;
+  }
+
   function updateRouteVisibility() {
     for (const [serviceNo, layers] of routeLookup.entries()) {
-      const visible = visibleServices.has(serviceNo);
+      const visible = activeViewMode === 'bus' && visibleServices.has(serviceNo);
 
       for (const record of layers) {
         syncLayerVisibility(record.glowLayer, visible);
@@ -302,7 +399,7 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     for (const [stopCode, marker] of markerLookup.entries()) {
       const stop = stopLookup.get(stopCode);
       const activeStopServices = stop.services.filter((serviceNo) => visibleServices.has(serviceNo));
-      const visible = activeStopServices.length > 0;
+      const visible = activeViewMode === 'bus' && activeStopServices.length > 0;
 
       syncLayerVisibility(marker, visible);
 
@@ -374,6 +471,24 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     });
   }
 
+  function buildRoomSearchIcon() {
+    return L.divIcon({
+      className: 'room-marker-icon',
+      html: `
+        <span class="room-marker">
+          <span class="room-marker-halo" aria-hidden="true"></span>
+          <span class="room-marker-pin" aria-hidden="true">
+            <span class="room-marker-core"></span>
+          </span>
+        </span>
+      `,
+      iconSize: [34, 44],
+      iconAnchor: [17, 38],
+      tooltipAnchor: [0, -30],
+      popupAnchor: [0, -30],
+    });
+  }
+
   function buildVehicleIcon(vehicle) {
     const bearing = getVehicleBearing(vehicle);
     const accentColor = vehicle.color || SERVICE_COLORS[vehicle.serviceNo] || '#2d6cdf';
@@ -425,6 +540,23 @@ export function createMapController(containerId, { onStopSelect } = {}) {
     }
 
     return parts.join(' • ');
+  }
+
+  function buildRoomSearchPopup(room) {
+    const metaParts = [room.buildingName, room.floorName ? `Floor ${room.floorName}` : null, room.campusName]
+      .filter(Boolean)
+      .map((value) => escapeHtml(value));
+    const identifierMarkup = room.identifier
+      ? `<p class="room-popup-code">${escapeHtml(room.identifier)}</p>`
+      : '';
+
+    return `
+      <div class="room-popup">
+        <p class="room-popup-title">${escapeHtml(room.title || room.identifier || 'NTU room')}</p>
+        ${identifierMarkup}
+        ${metaParts.length ? `<p class="room-popup-meta">${metaParts.join(' • ')}</p>` : ''}
+      </div>
+    `;
   }
 
   function getVehicleBearing(vehicle) {
@@ -801,7 +933,24 @@ export function createMapController(containerId, { onStopSelect } = {}) {
 
   function updateVehicleVisibility() {
     for (const { marker, serviceNo } of vehicleLookup.values()) {
-      syncLayerVisibility(marker, visibleServices.has(serviceNo));
+      syncLayerVisibility(marker, activeViewMode === 'bus' && visibleServices.has(serviceNo));
+    }
+  }
+
+  function syncRoomSearchVisibility() {
+    if (!roomSearchMarker) {
+      return;
+    }
+
+    if (activeViewMode === 'map') {
+      if (!roomGroup.hasLayer(roomSearchMarker)) {
+        roomGroup.addLayer(roomSearchMarker);
+      }
+      return;
+    }
+
+    if (roomGroup.hasLayer(roomSearchMarker)) {
+      roomGroup.removeLayer(roomSearchMarker);
     }
   }
 

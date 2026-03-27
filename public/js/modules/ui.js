@@ -1,31 +1,53 @@
 import { DEFAULT_VISIBLE_SERVICES, SERVICE_COLORS, SERVICES } from './constants.js';
 import { escapeHtml, formatMinutesValue } from './formatters.js';
 
-export function createUIController({ onVisibilityChange }) {
+export function createUIController({
+  onRoomClear,
+  onRoomResultSelect,
+  onRoomSearch,
+  onViewChange,
+  onVisibilityChange,
+}) {
   const elements = {
     bottomNavButtons: Array.from(document.querySelectorAll('.bottom-nav-item')),
+    mapStatus: document.querySelector('#map-status'),
     nearbyPanel: document.querySelector('#nearby-panel'),
     nearbyPanelList: document.querySelector('#nearby-panel-list'),
     nearbyPanelSubtitle: document.querySelector('#nearby-panel-subtitle'),
+    roomSearchClear: document.querySelector('#room-search-clear'),
+    roomSearchForm: document.querySelector('#room-search-form'),
+    roomSearchInput: document.querySelector('#room-search-input'),
+    roomSearchPanel: document.querySelector('#room-search-panel'),
+    roomSearchResults: document.querySelector('#room-search-results'),
+    roomSearchSubmit: document.querySelector('#room-search-submit'),
+    roomSearchSubtitle: document.querySelector('#room-search-subtitle'),
     routePicker: document.querySelector('.route-picker'),
     routeButtons: Array.from(document.querySelectorAll('.route-bubble')),
-    mapStatus: document.querySelector('#map-status'),
     viewPlaceholder: document.querySelector('#view-placeholder'),
   };
 
   let activeView = 'bus';
+  let roomResults = [];
+  let selectedRoomId = null;
   let visibleServices = new Set(DEFAULT_VISIBLE_SERVICES);
 
   bindEvents();
   syncNavView();
   syncRouteButtons();
+  resetRoomSearch();
 
   return {
+    getActiveView,
     hideStatus,
+    resetRoomSearch,
     setNearbyStopsLoading,
     setNearbyStopsState,
-    showGlobalStatus,
+    setRoomSearchError,
+    setRoomSearchLoading,
+    setRoomSearchResults,
+    setRoomSearchSelection,
     showGlobalError,
+    showGlobalStatus,
   };
 
   function bindEvents() {
@@ -40,6 +62,7 @@ export function createUIController({ onVisibilityChange }) {
         activeView = targetView;
         hideStatus();
         syncNavView();
+        onViewChange?.(activeView);
       });
     });
 
@@ -58,10 +81,53 @@ export function createUIController({ onVisibilityChange }) {
         onVisibilityChange?.([...visibleServices]);
       });
     });
+
+    elements.roomSearchForm?.addEventListener('submit', (event) => {
+      event.preventDefault();
+
+      const query = String(elements.roomSearchInput?.value || '').trim();
+
+      if (!query) {
+        clearRoomSearch();
+        return;
+      }
+
+      onRoomSearch?.(query);
+    });
+
+    elements.roomSearchClear?.addEventListener('click', () => {
+      clearRoomSearch();
+    });
+
+    elements.roomSearchInput?.addEventListener('input', () => {
+      syncRoomSearchClearButton();
+    });
+
+    elements.roomSearchResults?.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-room-index]');
+
+      if (!button) {
+        return;
+      }
+
+      const room = roomResults[Number(button.dataset.roomIndex)];
+
+      if (!room) {
+        return;
+      }
+
+      selectedRoomId = room.id;
+      renderRoomSearchResults(roomResults);
+      onRoomResultSelect?.(room);
+    });
+  }
+
+  function getActiveView() {
+    return activeView;
   }
 
   function syncNavView() {
-    const showPlaceholder = activeView === 'map';
+    const showMapView = activeView === 'map';
 
     elements.bottomNavButtons.forEach((button) => {
       const active = button.dataset.navView === activeView;
@@ -75,15 +141,19 @@ export function createUIController({ onVisibilityChange }) {
     });
 
     if (elements.routePicker) {
-      elements.routePicker.hidden = showPlaceholder;
+      elements.routePicker.hidden = showMapView;
     }
 
     if (elements.nearbyPanel) {
-      elements.nearbyPanel.hidden = showPlaceholder;
+      elements.nearbyPanel.hidden = showMapView;
+    }
+
+    if (elements.roomSearchPanel) {
+      elements.roomSearchPanel.hidden = !showMapView;
     }
 
     if (elements.viewPlaceholder) {
-      elements.viewPlaceholder.hidden = !showPlaceholder;
+      elements.viewPlaceholder.hidden = true;
     }
   }
 
@@ -155,6 +225,127 @@ export function createUIController({ onVisibilityChange }) {
       .join('');
   }
 
+  function setRoomSearchLoading(query) {
+    roomResults = [];
+    selectedRoomId = null;
+    setRoomSearchSubtitle(`Searching for "${query}"...`);
+    syncRoomSearchBusyState(true);
+    syncRoomSearchClearButton();
+    syncRoomSearchResultsVisibility(true);
+
+    if (!elements.roomSearchResults) {
+      return;
+    }
+
+    elements.roomSearchResults.innerHTML = `
+      <p class="room-search-empty">Checking NTU room matches for ${escapeHtml(query)}...</p>
+    `;
+  }
+
+  function setRoomSearchResults({ items = [], query = '', selectedId = null } = {}) {
+    roomResults = items;
+    selectedRoomId = selectedId || items[0]?.id || null;
+
+    setRoomSearchSubtitle(
+      items.length
+        ? `Showing ${items.length} match${items.length === 1 ? '' : 'es'} for "${query}".`
+        : `No NTU rooms matched "${query}".`
+    );
+    syncRoomSearchBusyState(false);
+    syncRoomSearchClearButton();
+    syncRoomSearchResultsVisibility(items.length > 0 || Boolean(query));
+    renderRoomSearchResults(items, query);
+  }
+
+  function setRoomSearchSelection(roomId) {
+    selectedRoomId = roomId || null;
+    renderRoomSearchResults(roomResults);
+  }
+
+  function setRoomSearchError(message) {
+    roomResults = [];
+    selectedRoomId = null;
+    setRoomSearchSubtitle('Room search is unavailable right now.');
+    syncRoomSearchBusyState(false);
+    syncRoomSearchClearButton();
+    syncRoomSearchResultsVisibility(true);
+
+    if (!elements.roomSearchResults) {
+      return;
+    }
+
+    elements.roomSearchResults.innerHTML = `
+      <p class="room-search-empty">${escapeHtml(message)}</p>
+    `;
+  }
+
+  function resetRoomSearch() {
+    roomResults = [];
+    selectedRoomId = null;
+    setRoomSearchSubtitle('Search by room code or title. The selected room will be pinned on the map.');
+    syncRoomSearchBusyState(false);
+    syncRoomSearchClearButton();
+    syncRoomSearchResultsVisibility(false);
+
+    if (!elements.roomSearchResults) {
+      return;
+    }
+
+    elements.roomSearchResults.innerHTML = '';
+  }
+
+  function clearRoomSearch() {
+    if (elements.roomSearchInput) {
+      elements.roomSearchInput.value = '';
+    }
+
+    resetRoomSearch();
+    onRoomClear?.();
+  }
+
+  function renderRoomSearchResults(items, query = '') {
+    if (!elements.roomSearchResults) {
+      return;
+    }
+
+    if (!items.length) {
+      elements.roomSearchResults.innerHTML = `
+        <p class="room-search-empty">${
+          query
+            ? `No NTU rooms matched ${escapeHtml(query)}.`
+            : 'Search for an NTU room to drop a pin on the map.'
+        }</p>
+      `;
+      return;
+    }
+
+    elements.roomSearchResults.innerHTML = items
+      .map((room, index) => {
+        const metaParts = [room.buildingName, room.floorName ? `Floor ${room.floorName}` : null, room.campusName]
+          .filter(Boolean)
+          .map((value) => escapeHtml(value));
+
+        return `
+          <button
+            class="room-search-result${room.id === selectedRoomId ? ' is-active' : ''}"
+            type="button"
+            data-room-index="${index}"
+          >
+            <span class="room-search-result-head">
+              <span class="room-search-result-title">${escapeHtml(room.title || room.identifier || 'Untitled room')}</span>
+              ${
+                room.identifier
+                  ? `<span class="room-search-result-code">${escapeHtml(room.identifier)}</span>`
+                  : ''
+              }
+            </span>
+            <span class="room-search-result-meta">${metaParts.join(' • ')}</span>
+          </button>
+        `;
+      })
+      .join('');
+  }
+
   function setNearbyPanelSubtitle(message = '') {
     if (!elements.nearbyPanelSubtitle) {
       return;
@@ -162,6 +353,40 @@ export function createUIController({ onVisibilityChange }) {
 
     elements.nearbyPanelSubtitle.textContent = message || '';
     elements.nearbyPanelSubtitle.hidden = !message;
+  }
+
+  function setRoomSearchSubtitle(message = '') {
+    if (!elements.roomSearchSubtitle) {
+      return;
+    }
+
+    elements.roomSearchSubtitle.textContent = message || '';
+    elements.roomSearchSubtitle.hidden = !message;
+  }
+
+  function syncRoomSearchBusyState(isBusy) {
+    if (elements.roomSearchSubmit) {
+      elements.roomSearchSubmit.disabled = isBusy;
+      elements.roomSearchSubmit.textContent = isBusy ? 'Searching...' : 'Search';
+    }
+  }
+
+  function syncRoomSearchClearButton() {
+    if (!elements.roomSearchClear) {
+      return;
+    }
+
+    const hasValue = Boolean(String(elements.roomSearchInput?.value || '').trim());
+    const hasResults = roomResults.length > 0;
+    elements.roomSearchClear.hidden = !hasValue && !hasResults;
+  }
+
+  function syncRoomSearchResultsVisibility(visible) {
+    if (!elements.roomSearchResults) {
+      return;
+    }
+
+    elements.roomSearchResults.hidden = !visible;
   }
 
   function showGlobalStatus(message, tone = 'info') {

@@ -52,6 +52,34 @@
           </div>
         </section>
 
+        <section class="room-search-panel glass-panel" id="room-search-panel" hidden aria-live="polite">
+          <div class="room-search-head">
+            <p class="room-search-title">NTU Room Search</p>
+            <p class="room-search-subtitle" id="room-search-subtitle">
+              Search by room code or title. The selected room will be pinned on the map.
+            </p>
+          </div>
+
+          <form class="room-search-form" id="room-search-form" autocomplete="off">
+            <label class="room-search-field" for="room-search-input">
+              <span class="sr-only">Search NTU rooms</span>
+              <input
+                class="room-search-input"
+                id="room-search-input"
+                type="search"
+                name="room-search"
+                placeholder="Try NS2-05-29 or Tutorial Room 36"
+                enterkeyhint="search"
+              />
+            </label>
+            <button class="room-search-submit" id="room-search-submit" type="submit">Search</button>
+            <button class="room-search-clear" id="room-search-clear" type="button" hidden>Clear</button>
+          </form>
+
+          <div class="room-search-results" id="room-search-results">
+          </div>
+        </section>
+
         <div class="route-picker" aria-label="Route selection">
           <button
             class="route-bubble route-bubble-179"
