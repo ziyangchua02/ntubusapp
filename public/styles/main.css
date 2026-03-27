@@ -84,6 +84,7 @@ button {
 .nearby-panel,
 .room-search-panel,
 .route-picker,
+.direction-picker,
 .bottom-nav,
 .view-placeholder,
 .status-card {
@@ -244,7 +245,8 @@ button {
   line-height: 1.16;
 }
 
-.route-picker {
+.route-picker,
+.direction-picker {
   position: absolute;
   top: clamp(1rem, 2vw, 1.5rem);
   right: clamp(1rem, 2vw, 1.5rem);
@@ -325,6 +327,28 @@ button {
 
 .route-bubble-cwr.is-active {
   background: rgba(138, 90, 60, 0.82);
+}
+
+.direction-bubble-walk.is-active {
+  background: rgba(47, 170, 96, 0.82);
+}
+
+.direction-bubble-bus.is-active {
+  background: rgba(45, 108, 223, 0.84);
+}
+
+.direction-bubble-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.34rem;
+  height: 1.34rem;
+}
+
+.direction-bubble-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
 }
 
 .route-bubble-label {
@@ -1232,7 +1256,8 @@ button {
     font-size: 0.58rem;
   }
 
-  .route-picker {
+  .route-picker,
+  .direction-picker {
     top: calc(0.8rem + env(safe-area-inset-top));
     right: 0.8rem;
     gap: 0.45rem;

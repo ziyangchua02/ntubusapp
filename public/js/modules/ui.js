@@ -2,6 +2,7 @@ import { DEFAULT_VISIBLE_SERVICES, SERVICE_COLORS, SERVICES } from './constants.
 import { escapeHtml, formatMinutesValue } from './formatters.js';
 
 export function createUIController({
+  onDirectionAction,
   onRoomClear,
   onRoomResultSelect,
   onRoomSearch,
@@ -10,6 +11,8 @@ export function createUIController({
 }) {
   const elements = {
     bottomNavButtons: Array.from(document.querySelectorAll('.bottom-nav-item')),
+    directionButtons: Array.from(document.querySelectorAll('[data-direction-mode]')),
+    directionPicker: document.querySelector('#direction-picker'),
     mapStatus: document.querySelector('#map-status'),
     nearbyPanel: document.querySelector('#nearby-panel'),
     nearbyPanelList: document.querySelector('#nearby-panel-list'),
@@ -21,11 +24,12 @@ export function createUIController({
     roomSearchResults: document.querySelector('#room-search-results'),
     roomSearchSubmit: document.querySelector('#room-search-submit'),
     routePicker: document.querySelector('.route-picker'),
-    routeButtons: Array.from(document.querySelectorAll('.route-bubble')),
+    routeButtons: Array.from(document.querySelectorAll('.route-picker [data-service]')),
     viewPlaceholder: document.querySelector('#view-placeholder'),
   };
 
   let activeView = 'bus';
+  let directionOptionsVisible = false;
   let roomResults = [];
   let selectedRoomId = null;
   let visibleServices = new Set(DEFAULT_VISIBLE_SERVICES);
@@ -39,6 +43,7 @@ export function createUIController({
     getActiveView,
     hideStatus,
     resetRoomSearch,
+    setDirectionOptionsVisible,
     setNearbyStopsLoading,
     setNearbyStopsState,
     setRoomSearchError,
@@ -78,6 +83,18 @@ export function createUIController({
         syncRouteButtons();
         hideStatus();
         onVisibilityChange?.([...visibleServices]);
+      });
+    });
+
+    elements.directionButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const mode = button.dataset.directionMode;
+
+        if (mode !== 'walk' && mode !== 'bus') {
+          return;
+        }
+
+        onDirectionAction?.(mode);
       });
     });
 
@@ -151,9 +168,19 @@ export function createUIController({
       elements.roomSearchPanel.hidden = !showMapView;
     }
 
+    syncDirectionPickerVisibility(showMapView);
+
     if (elements.viewPlaceholder) {
       elements.viewPlaceholder.hidden = true;
     }
+  }
+
+  function syncDirectionPickerVisibility(showMapView = activeView === 'map') {
+    if (!elements.directionPicker) {
+      return;
+    }
+
+    elements.directionPicker.hidden = !showMapView || !directionOptionsVisible;
   }
 
   function syncRouteButtons() {
@@ -335,6 +362,11 @@ export function createUIController({
         `;
       })
       .join('');
+  }
+
+  function setDirectionOptionsVisible(visible) {
+    directionOptionsVisible = Boolean(visible);
+    syncDirectionPickerVisibility();
   }
 
   function setNearbyPanelSubtitle(message = '') {

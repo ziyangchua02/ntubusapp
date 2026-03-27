@@ -25,10 +25,14 @@ const LOCATION_WATCH_OPTIONS = {
 };
 
 const uiController = createUIController({
+  onDirectionAction: (mode) => {
+    openExternalDirections(mode);
+  },
   onRoomClear: () => {
     roomSearchAbortController?.abort();
     roomSearchAbortController = null;
     activeRoomSearchResult = null;
+    uiController.setDirectionOptionsVisible(false);
     mapController?.clearRoomSearchResult();
   },
   onRoomResultSelect: (room) => {
@@ -41,6 +45,7 @@ const uiController = createUIController({
       openPopup: true,
     });
     uiController.setRoomSearchSelection(room.id);
+    uiController.setDirectionOptionsVisible(true);
   },
   onRoomSearch: (query) => {
     void searchRooms(query);
@@ -52,7 +57,11 @@ const uiController = createUIController({
       mapController?.setRoomSearchResult(activeRoomSearchResult, {
         focus: false,
       });
+      uiController.setDirectionOptionsVisible(true);
+      return;
     }
+
+    uiController.setDirectionOptionsVisible(false);
   },
   onVisibilityChange: (serviceNos) => {
     if (!mapController) {
@@ -94,6 +103,7 @@ async function bootstrap() {
       focus: uiController.getActiveView() === 'map',
       openPopup: false,
     });
+    uiController.setDirectionOptionsVisible(uiController.getActiveView() === 'map');
   }
 
   uiController.hideStatus();
@@ -219,6 +229,7 @@ async function searchRooms(query) {
     if (!results.length) {
       activeRoomSearchResult = null;
       mapController?.clearRoomSearchResult();
+      uiController.setDirectionOptionsVisible(false);
       uiController.setRoomSearchResults({
         items: [],
         query,
@@ -237,6 +248,7 @@ async function searchRooms(query) {
       query,
       selectedId: primaryResult.id,
     });
+    uiController.setDirectionOptionsVisible(true);
   } catch (error) {
     if (error.name === 'AbortError') {
       return;
@@ -244,6 +256,7 @@ async function searchRooms(query) {
 
     activeRoomSearchResult = null;
     mapController?.clearRoomSearchResult();
+    uiController.setDirectionOptionsVisible(false);
     uiController.setRoomSearchError(error.message);
   }
 }
@@ -311,6 +324,7 @@ function startLocationTracking() {
     (error) => {
       userLocation = null;
       mapController?.clearUserLocation();
+
       uiController.setNearbyStopsState({
         items: [],
         subtitle:
@@ -436,4 +450,89 @@ function stopSupportsLiveData(stopCode) {
   const liveServices = new Set(health.liveServices || LIVE_SERVICES);
 
   return Boolean(stop?.services?.some((serviceNo) => liveServices.has(serviceNo)));
+}
+
+function buildRoomDisplayName(room) {
+  return room?.identifier ? `${room.title} (${room.identifier})` : room?.title || 'your destination';
+}
+
+function openExternalDirections(mode) {
+  if (!activeRoomSearchResult) {
+    return;
+  }
+
+  const url = buildExternalDirectionsUrl({
+    destination: activeRoomSearchResult,
+    mode,
+    origin: userLocation,
+  });
+
+  if (!url) {
+    return;
+  }
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  document.body.append(link);
+  link.click();
+  link.remove();
+}
+
+function buildExternalDirectionsUrl({ destination, mode = 'walk', origin = null } = {}) {
+  if (!destination || !Number.isFinite(destination.lat) || !Number.isFinite(destination.lng)) {
+    return '';
+  }
+
+  if (prefersAppleMaps()) {
+    return buildAppleMapsDirectionsUrl({ destination, mode, origin });
+  }
+
+  return buildGoogleMapsDirectionsUrl({ destination, mode, origin });
+}
+
+function buildGoogleMapsDirectionsUrl({ destination, mode = 'walk', origin = null } = {}) {
+  const url = new URL('https://www.google.com/maps/dir/');
+  const travelMode = mode === 'bus' ? 'transit' : 'walking';
+
+  url.searchParams.set('api', '1');
+  url.searchParams.set('destination', `${destination.lat},${destination.lng}`);
+  url.searchParams.set('travelmode', travelMode);
+  url.searchParams.set('dir_action', 'navigate');
+
+  if (origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)) {
+    url.searchParams.set('origin', `${origin.lat},${origin.lng}`);
+  }
+
+  return url.toString();
+}
+
+function buildAppleMapsDirectionsUrl({ destination, mode = 'walk', origin = null } = {}) {
+  const url = new URL('https://maps.apple.com/');
+  const directionFlag = mode === 'bus' ? 'r' : 'w';
+  const coordinatePair = `${destination.lat},${destination.lng}`;
+
+  url.searchParams.set('daddr', coordinatePair);
+  url.searchParams.set('dirflg', directionFlag);
+  url.searchParams.set('ll', coordinatePair);
+  url.searchParams.set('q', buildRoomDisplayName(destination));
+
+  if (origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)) {
+    url.searchParams.set('saddr', `${origin.lat},${origin.lng}`);
+  }
+
+  return url.toString();
+}
+
+function prefersAppleMaps() {
+  const userAgent = navigator.userAgent || '';
+  const platform = navigator.userAgentData?.platform || navigator.platform || '';
+  const maxTouchPoints = Number(navigator.maxTouchPoints || 0);
+
+  return (
+    /iPhone|iPad|iPod/i.test(userAgent) ||
+    /Mac/i.test(platform) ||
+    (/Macintosh/i.test(userAgent) && maxTouchPoints > 1)
+  );
 }

@@ -72,8 +72,7 @@
             <button class="room-search-clear" id="room-search-clear" type="button" hidden>Clear</button>
           </form>
 
-          <div class="room-search-results" id="room-search-results">
-          </div>
+          <div class="room-search-results" id="room-search-results"></div>
         </section>
 
         <div class="route-picker" aria-label="Route selection">
@@ -130,6 +129,35 @@
             aria-pressed="false"
           >
             <span class="route-bubble-label route-bubble-label-compact">CWR</span>
+          </button>
+        </div>
+
+        <div class="direction-picker" id="direction-picker" aria-label="Directions mode" hidden>
+          <button
+            class="route-bubble direction-bubble direction-bubble-walk is-active"
+            data-direction-mode="walk"
+            type="button"
+            aria-label="Open walking directions"
+          >
+            <span class="direction-bubble-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M14 4.75a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-3.87 4.03a1.25 1.25 0 0 1 1.46-.86l1.98.41c.46.1.85.44 1.02.88l.75 1.95 1.88 1.76a1.25 1.25 0 1 1-1.7 1.83l-2.08-1.94a1.26 1.26 0 0 1-.31-.48l-.31-.8-.7 2.7 1.55 1.63c.18.2.3.45.33.72l.4 3.05a1.25 1.25 0 1 1-2.47.33l-.34-2.55-1.75-1.85a1.25 1.25 0 0 1-.3-1.18l.8-3.1-1.2 1.33a1.25 1.25 0 0 1-.8.4l-2.04.17a1.25 1.25 0 0 1-.2-2.49l1.54-.13 2.13-2.36Z"></path>
+              </svg>
+            </span>
+            <span class="sr-only">Walk</span>
+          </button>
+          <button
+            class="route-bubble direction-bubble direction-bubble-bus is-active"
+            data-direction-mode="bus"
+            type="button"
+            aria-label="Open bus directions"
+          >
+            <span class="direction-bubble-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M6 3h12l2 7v8a1 1 0 0 1-1 1h-1a2 2 0 0 1-4 0h-4a2 2 0 0 1-4 0H5a1 1 0 0 1-1-1v-8l2-7Zm1.5 2L6.2 9h11.6L16.5 5h-9ZM6 11v4h12v-4H6Z"></path>
+              </svg>
+            </span>
+            <span class="sr-only">Bus</span>
           </button>
         </div>
 
